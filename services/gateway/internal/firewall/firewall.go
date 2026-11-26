@@ -1,10 +1,12 @@
 package firewall
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os/exec"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -124,7 +126,22 @@ func (n *NftablesDriver) RevokePair(guestIP, receiverIP string) error {
 	if out, err := n.runner("nft", "delete", "element", "inet", n.table, n.set, expr); err != nil {
 		return fmt.Errorf("nft delete element failed: %w (%s)", err, string(out))
 	}
+	if err := n.flushConntrack(guestIP, receiverIP); err != nil {
+		return err
+	}
 	return n.mem.RevokePair(guestIP, receiverIP)
+}
+
+func (n *NftablesDriver) flushConntrack(guestIP, receiverIP string) error {
+	out, err := n.runner("conntrack", "-D", "-s", guestIP, "-d", receiverIP)
+	if err == nil {
+		return nil
+	}
+	// Non-fatal when conntrack-tools is not installed or no matching flow exists.
+	if errors.Is(err, exec.ErrNotFound) || strings.Contains(string(out), "0 flow entries have been deleted") {
+		return nil
+	}
+	return fmt.Errorf("conntrack flush failed: %w (%s)", err, string(out))
 }
 
 func (n *NftablesDriver) ActiveRules() []Rule {
