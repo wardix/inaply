@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  gateway:
+    build:
+      context: ../services/gateway
+      dockerfile: Dockerfile
+    container_name: inaply-gateway
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - gateway_state:/var/lib/inaply
+    command:
+      - "-addr=:8080"
+      - "-mdns-addr=0.0.0.0:5353"
+      - "-ssdp-addr=0.0.0.0:1900"
+      - "-state-file=/var/lib/inaply/edge-state.json"
+      - "-dry-run=true"
+
+volumes:
+  gateway_state:

@@ -1,0 +1,21 @@
+[Unit]
+Description=Inaply Cast On-Premise Gateway (mDNS/SSDP Proxy + Room Isolation)
+After=network-online.target nftables.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/inaply-gateway \
+  -addr=:8080 \
+  -mdns-addr=0.0.0.0:5353 \
+  -ssdp-addr=0.0.0.0:1900 \
+  -state-file=/var/lib/inaply/edge-state.json \
+  -firewall=nftables
+Restart=always
+RestartSec=3
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+StateDirectory=inaply
+
+[Install]
+WantedBy=multi-user.target

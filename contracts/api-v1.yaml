@@ -1,0 +1,269 @@
+openapi: 3.0.3
+info:
+  title: Inaply Cast Platform API
+  version: 1.0.0
+  description: >
+    Shared contract between On-Premise Gateway, Android TV Receiver,
+    Front Office / PMS Adapter, and Cloud Multi-Tenant CMS.
+
+paths:
+  /api/v1/pair/portal:
+    post:
+      summary: Auto-pair guest device via Captive Portal / RADIUS login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [room_number, guest_name]
+              properties:
+                room_number:
+                  type: string
+                  example: "301"
+                guest_name:
+                  type: string
+                  example: "Budi"
+                guest_ip:
+                  type: string
+                  description: Optional override; defaults to caller RemoteAddr
+                guest_mac:
+                  type: string
+      responses:
+        "200":
+          description: Paired successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PairResult"
+
+  /api/v1/pair/pin:
+    post:
+      summary: Pair guest device via fallback 6-digit PIN or QR token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin]
+              properties:
+                pin:
+                  type: string
+                  example: "482910"
+                guest_ip:
+                  type: string
+      responses:
+        "200":
+          description: Paired successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PairResult"
+
+  /api/v1/tv/state:
+    get:
+      summary: Poll room welcome screen, ads, messages, and pairing PIN for TV Receiver
+      parameters:
+        - name: device_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current backdrop and session state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TVBackdropState"
+
+  /api/v1/tv/heartbeat:
+    post:
+      summary: Report TV Receiver health, active cast session, and OS telemetry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id, status]
+              properties:
+                device_id:
+                  type: string
+                status:
+                  type: string
+                  enum: [idle, casting, mirroring, error]
+                app_version:
+                  type: string
+                hdmi_cec_attached:
+                  type: boolean
+      responses:
+        "200":
+          description: Heartbeat acknowledged
+
+  /api/v1/pms/checkin:
+    post:
+      summary: Check-in guest to a room (from PMS Adapter or Front Office Console)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [room_number, guest_name]
+              properties:
+                room_number:
+                  type: string
+                guest_name:
+                  type: string
+                segment:
+                  type: string
+                  enum: [leisure, corporate, vip]
+                  default: leisure
+                checkout_at:
+                  type: string
+                  format: date-time
+      responses:
+        "200":
+          description: Room updated
+
+  /api/v1/pms/checkout:
+    post:
+      summary: Check-out room and immediately wipe sessions, mDNS visibility, and firewall rules
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [room_number]
+              properties:
+                room_number:
+                  type: string
+      responses:
+        "200":
+          description: Room cleared
+
+  /api/v1/messages:
+    post:
+      summary: Send guest message to a specific room or broadcast to all rooms
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GuestMessageInput"
+      responses:
+        "200":
+          description: Message queued for room TVs
+
+components:
+  schemas:
+    PairResult:
+      type: object
+      properties:
+        session_id:
+          type: string
+        room_number:
+          type: string
+        guest_ip:
+          type: string
+        pairing_mode:
+          type: string
+          enum: [portal, radius, qr_pin, fo_manual]
+        receivers:
+          type: array
+          items:
+            type: object
+            properties:
+              device_id:
+                type: string
+              label:
+                type: string
+              ip:
+                type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    TVBackdropState:
+      type: object
+      properties:
+        room_number:
+          type: string
+        device_id:
+          type: string
+        device_label:
+          type: string
+        occupied:
+          type: boolean
+        guest_name:
+          type: string
+        segment:
+          type: string
+        hotel_name:
+          type: string
+        welcome_title:
+          type: string
+        welcome_subtitle:
+          type: string
+        wifi_ssid:
+          type: string
+        pairing_pin:
+          type: string
+        pairing_url:
+          type: string
+        active_paired_devices:
+          type: integer
+        reset_epoch:
+          type: integer
+          description: Increments on checkout so TV stops active playback and returns to welcome screen
+        ads:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+              media_url:
+                type: string
+              cta_url:
+                type: string
+              duration_sec:
+                type: integer
+        messages:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+              body:
+                type: string
+              priority:
+                type: string
+                enum: [normal, urgent, emergency]
+              show_as_overlay:
+                type: boolean
+
+    GuestMessageInput:
+      type: object
+      required: [title, body]
+      properties:
+        room_number:
+          type: string
+          description: Empty means broadcast to all rooms
+        title:
+          type: string
+        body:
+          type: string
+        priority:
+          type: string
+          enum: [normal, urgent, emergency]
+        show_as_overlay:
+          type: boolean
