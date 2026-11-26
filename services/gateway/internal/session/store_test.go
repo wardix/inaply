@@ -157,3 +157,121 @@ func TestCheckOut_TerminatesOnlyTargetRoomFlows(t *testing.T) {
 		t.Fatalf("room 301 checkout must not touch room 302 flow, got commands: %v", commands)
 	}
 }
+
+func TestRoamingUpdate_ReplacesGuestIPAndFirewallRule(t *testing.T) {
+	fw := firewall.NewMemoryDriver()
+	store := NewStore(fw, nil)
+	store.SeedDemoProperty()
+
+	if _, err := store.PairViaPortal("301", "Budi", "10.10.30.10", "aa:bb:cc:00:00:01"); err != nil {
+		t.Fatalf("PairViaPortal failed: %v", err)
+	}
+
+	// Bind RadiusSessionID via Start event
+	if err := store.HandleRadiusAccounting(models.RadiusAccountingEvent{
+		StatusType:      "Start",
+		RadiusSessionID: "rad-301-1",
+		RoomNumber:      "301",
+		GuestIP:         "10.10.30.10",
+		GuestMAC:        "aa:bb:cc:00:00:01",
+	}); err != nil {
+		t.Fatalf("HandleRadiusAccounting Start failed: %v", err)
+	}
+
+	// Roaming: IP changes from 10.10.30.10 -> 10.10.30.55
+	if err := store.HandleRadiusAccounting(models.RadiusAccountingEvent{
+		StatusType:      "Interim-Update",
+		RadiusSessionID: "rad-301-1",
+		RoomNumber:      "301",
+		GuestIP:         "10.10.30.55",
+		GuestMAC:        "aa:bb:cc:00:00:01",
+	}); err != nil {
+		t.Fatalf("HandleRadiusAccounting Interim-Update failed: %v", err)
+	}
+
+	if room, _ := store.ReceiversForGuestIP("10.10.30.10"); room != nil {
+		t.Fatalf("expected old IP 10.10.30.10 to be revoked")
+	}
+	if room, rcvs := store.ReceiversForGuestIP("10.10.30.55"); room == nil || room.RoomNumber != "301" || len(rcvs) == 0 {
+		t.Fatalf("expected new IP 10.10.30.55 to be active for room 301")
+	}
+	for _, r := range fw.ActiveRules() {
+		if r.GuestIP == "10.10.30.10" {
+			t.Fatalf("old firewall rule for 10.10.30.10 was not removed")
+		}
+	}
+}
+
+func TestMACRandomization_PreservesSessionByRadiusSessionID(t *testing.T) {
+	fw := firewall.NewMemoryDriver()
+	store := NewStore(fw, nil)
+	store.SeedDemoProperty()
+
+	if _, err := store.PairViaPortal("301", "Budi", "10.10.30.10", "aa:bb:cc:00:00:01"); err != nil {
+		t.Fatalf("PairViaPortal failed: %v", err)
+	}
+	if err := store.HandleRadiusAccounting(models.RadiusAccountingEvent{
+		StatusType:      "Start",
+		RadiusSessionID: "rad-mac-1",
+		GuestIP:         "10.10.30.10",
+		GuestMAC:        "aa:bb:cc:00:00:01",
+	}); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// MAC randomization on Interim-Update with same RadiusSessionID
+	if err := store.HandleRadiusAccounting(models.RadiusAccountingEvent{
+		StatusType:      "Interim-Update",
+		RadiusSessionID: "rad-mac-1",
+		GuestIP:         "10.10.30.10",
+		GuestMAC:        "de:ad:be:ef:00:02",
+	}); err != nil {
+		t.Fatalf("Interim-Update failed: %v", err)
+	}
+
+	if room, _ := store.ReceiversForGuestIP("10.10.30.10"); room == nil || room.RoomNumber != "301" {
+		t.Fatalf("expected session to remain active after MAC randomization")
+	}
+	_, sessions, _ := store.ListRoomsAndSessions()
+	if len(sessions) != 1 || sessions[0].GuestMAC != "de:ad:be:ef:00:02" {
+		t.Fatalf("expected 1 session with updated MAC, got %+v", sessions)
+	}
+}
+
+func TestRadiusStop_RevokesOnlyEndedSession(t *testing.T) {
+	fw := firewall.NewMemoryDriver()
+	store := NewStore(fw, nil)
+	store.SeedDemoProperty()
+
+	if _, err := store.PairViaPortal("301", "Budi", "10.10.30.10", "aa:bb:cc:00:00:01"); err != nil {
+		t.Fatalf("PairViaPortal 1 failed: %v", err)
+	}
+	if _, err := store.PairViaPortal("301", "Budi", "10.10.30.11", "aa:bb:cc:00:00:02"); err != nil {
+		t.Fatalf("PairViaPortal 2 failed: %v", err)
+	}
+	_ = store.HandleRadiusAccounting(models.RadiusAccountingEvent{
+		StatusType:      "Start",
+		RadiusSessionID: "rad-1",
+		GuestIP:         "10.10.30.10",
+	})
+	_ = store.HandleRadiusAccounting(models.RadiusAccountingEvent{
+		StatusType:      "Start",
+		RadiusSessionID: "rad-2",
+		GuestIP:         "10.10.30.11",
+	})
+
+	if err := store.HandleRadiusAccounting(models.RadiusAccountingEvent{
+		StatusType:      "Stop",
+		RadiusSessionID: "rad-1",
+		GuestIP:         "10.10.30.10",
+	}); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	if room, _ := store.ReceiversForGuestIP("10.10.30.10"); room != nil {
+		t.Fatalf("expected stopped session 10.10.30.10 to be revoked")
+	}
+	if room, _ := store.ReceiversForGuestIP("10.10.30.11"); room == nil || room.RoomNumber != "301" {
+		t.Fatalf("expected other device 10.10.30.11 in room 301 to remain active")
+	}
+}
