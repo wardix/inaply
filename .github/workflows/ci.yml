@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  gateway-test:
+    name: gateway-test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/gateway
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.18"
+          cache-dependency-path: services/gateway/go.mod
+
+      - name: Vet Go packages
+        run: go vet ./...
+
+      - name: Run Go race tests with coverage
+        run: |
+          go test -count=1 -v -race -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+
+      - name: Build gateway binary
+        run: go build ./cmd/gateway
+
+  cms-test:
+    name: cms-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if CMS TypeScript project is initialized
+        id: check
+        run: |
+          if [ -f apps/cms/tsconfig.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: oven-sh/setup-bun@v2
+        if: steps.check.outputs.ready == 'true'
+
+      - name: Install, typecheck, and test CMS
+        if: steps.check.outputs.ready == 'true'
+        working-directory: apps/cms
+        run: |
+          bun install --frozen-lockfile || bun install
+          bun run typecheck
+          bun test
+
+  tv-receiver-test:
+    name: tv-receiver-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if Android Gradle wrapper is initialized
+        id: check
+        run: |
+          if [ -f apps/tv-receiver/gradlew ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.check.outputs.ready == 'true'
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Run Android TV unit tests
+        if: steps.check.outputs.ready == 'true'
+        working-directory: apps/tv-receiver
+        run: |
+          chmod +x ./gradlew
+          ./gradlew testDebugUnitTest
