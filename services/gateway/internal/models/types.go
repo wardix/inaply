@@ -57,14 +57,23 @@ type Room struct {
 }
 
 type GuestSession struct {
-	SessionID   string      `json:"session_id"`
-	RoomNumber  string      `json:"room_number"`
-	GuestIP     string      `json:"guest_ip"`
-	GuestMAC    string      `json:"guest_mac,omitempty"`
-	GuestName   string      `json:"guest_name,omitempty"`
-	PairingMode PairingMode `json:"pairing_mode"`
-	CreatedAt   time.Time   `json:"created_at"`
-	ExpiresAt   time.Time   `json:"expires_at"`
+	SessionID       string      `json:"session_id"`
+	RadiusSessionID string      `json:"radius_session_id,omitempty"`
+	RoomNumber      string      `json:"room_number"`
+	GuestIP         string      `json:"guest_ip"`
+	GuestMAC        string      `json:"guest_mac,omitempty"`
+	GuestName       string      `json:"guest_name,omitempty"`
+	PairingMode     PairingMode `json:"pairing_mode"`
+	CreatedAt       time.Time   `json:"created_at"`
+	ExpiresAt       time.Time   `json:"expires_at"`
+}
+
+type RadiusAccountingEvent struct {
+	StatusType      string `json:"acct_status_type"` // "Start", "Interim-Update", "Stop"
+	RadiusSessionID string `json:"acct_session_id"`
+	RoomNumber      string `json:"room_number,omitempty"`
+	GuestIP         string `json:"framed_ip_address"`
+	GuestMAC        string `json:"calling_station_id,omitempty"`
 }
 
 type AdCampaign struct {

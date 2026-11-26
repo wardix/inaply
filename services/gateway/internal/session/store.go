@@ -716,6 +716,72 @@ func (s *Store) ListRoomsAndSessions() ([]models.Room, []models.GuestSession, []
 	return rooms, sessions, receivers
 }
 
+// HandleRadiusAccounting synchronizes guest IP/MAC changes (roaming & MAC randomization)
+// and session termination from RADIUS Accounting Start/Interim-Update/Stop events.
+func (s *Store) HandleRadiusAccounting(ev models.RadiusAccountingEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sess := s.findSessionForRadiusLocked(ev)
+	if sess == nil {
+		return nil
+	}
+
+	receivers := s.receiversForRoomLocked(sess.RoomNumber)
+	if ev.StatusType == "Stop" {
+		for _, rcv := range receivers {
+			_ = s.fw.RevokePair(sess.GuestIP, rcv.IP)
+		}
+		delete(s.sessions, sess.GuestIP)
+		return s.persistLocked()
+	}
+
+	// Start or Interim-Update: handle IP roaming and MAC randomization.
+	if ev.GuestIP != "" && ev.GuestIP != sess.GuestIP {
+		for _, rcv := range receivers {
+			_ = s.fw.RevokePair(sess.GuestIP, rcv.IP)
+		}
+		delete(s.sessions, sess.GuestIP)
+		sess.GuestIP = ev.GuestIP
+		s.sessions[sess.GuestIP] = sess
+		for _, rcv := range receivers {
+			if err := s.fw.AllowPair(sess.GuestIP, rcv.IP); err != nil {
+				return err
+			}
+		}
+	}
+	if ev.GuestMAC != "" {
+		sess.GuestMAC = ev.GuestMAC
+	}
+	if ev.RadiusSessionID != "" {
+		sess.RadiusSessionID = ev.RadiusSessionID
+	}
+	return s.persistLocked()
+}
+
+func (s *Store) findSessionForRadiusLocked(ev models.RadiusAccountingEvent) *models.GuestSession {
+	if ev.RadiusSessionID != "" {
+		for _, sess := range s.sessions {
+			if sess.RadiusSessionID == ev.RadiusSessionID {
+				return sess
+			}
+		}
+	}
+	if ev.GuestMAC != "" {
+		for _, sess := range s.sessions {
+			if sess.GuestMAC == ev.GuestMAC {
+				return sess
+			}
+		}
+	}
+	if ev.GuestIP != "" {
+		if sess, ok := s.sessions[ev.GuestIP]; ok {
+			return sess
+		}
+	}
+	return nil
+}
+
 func segmentAllowed(targets []models.GuestSegment, current models.GuestSegment) bool {
 	if len(targets) == 0 {
 		return true
