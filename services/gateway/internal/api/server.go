@@ -11,13 +11,15 @@ import (
 
 	"github.com/inaply/gateway/internal/firewall"
 	"github.com/inaply/gateway/internal/models"
+	"github.com/inaply/gateway/internal/portal"
 	"github.com/inaply/gateway/internal/session"
 )
 
 type Server struct {
-	store *session.Store
-	fw    firewall.Driver
-	mux   *http.ServeMux
+	store         *session.Store
+	fw            firewall.Driver
+	mux           *http.ServeMux
+	portalHandler http.Handler
 }
 
 func NewServer(store *session.Store, fw firewall.Driver) *Server {
@@ -26,8 +28,20 @@ func NewServer(store *session.Store, fw firewall.Driver) *Server {
 		fw:    fw,
 		mux:   http.NewServeMux(),
 	}
+	s.SetPortalWebhookSecret("")
 	s.routes()
 	return s
+}
+
+// SetPortalWebhookSecret configures the shared secret for vendor portal webhooks.
+func (s *Server) SetPortalWebhookSecret(secret string) {
+	s.portalHandler = portal.NewWebhookHandler(
+		s.store,
+		portal.NewMikroTikAdapter(secret),
+		portal.NewUniFiAdapter(secret),
+		portal.NewRuijieAdapter(secret),
+		portal.NewOmadaAdapter(secret),
+	)
 }
 
 func (s *Server) Handler() http.Handler {
@@ -37,6 +51,9 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) routes() {
 	s.mux.HandleFunc("/healthz", s.handleHealth)
 	s.mux.HandleFunc("/api/v1/pair/portal", s.handlePairPortal)
+	s.mux.HandleFunc("/api/v1/portal/webhook/", func(w http.ResponseWriter, r *http.Request) {
+		s.portalHandler.ServeHTTP(w, r)
+	})
 	s.mux.HandleFunc("/api/v1/pair/pin", s.handlePairPIN)
 	s.mux.HandleFunc("/api/v1/tv/state", s.handleTVState)
 	s.mux.HandleFunc("/api/v1/tv/heartbeat", s.handleTVHeartbeat)

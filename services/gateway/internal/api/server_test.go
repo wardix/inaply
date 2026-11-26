@@ -89,3 +89,38 @@ func TestEndToEndHTTPWorkflow(t *testing.T) {
 		t.Fatalf("expected ResetEpoch bump and 0 paired devices after checkout, got %+v", tvState3)
 	}
 }
+
+func TestPortalWebhookRouteIntegration(t *testing.T) {
+	fw := firewall.NewMemoryDriver()
+	store := session.NewStore(fw, nil)
+	store.SeedDemoProperty()
+
+	srv := NewServer(store, fw)
+	srv.SetPortalWebhookSecret("integration-secret")
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	req, err := http.NewRequest(
+		http.MethodPost,
+		ts.URL+"/api/v1/portal/webhook/mikrotik",
+		bytes.NewBufferString(`{"room":"301","guest_name":"Budi","ip":"10.10.30.77","mac":"aa:bb:cc:00:00:77"}`),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest failed: %v", err)
+	}
+	req.Header.Set("X-Inaply-Token", "integration-secret")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK from /api/v1/portal/webhook/mikrotik, got %d", resp.StatusCode)
+	}
+	if room, _ := store.ReceiversForGuestIP("10.10.30.77"); room == nil || room.RoomNumber != "301" {
+		t.Fatalf("expected 10.10.30.77 bound to room 301")
+	}
+}
