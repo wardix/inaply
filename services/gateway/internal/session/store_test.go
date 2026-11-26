@@ -1,6 +1,7 @@
 package session
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -114,5 +115,45 @@ func TestMaxDevicesEvictionAndJanitorExpiry(t *testing.T) {
 	expired := store.ExpireStale(now.Add(48 * time.Hour))
 	if expired != 5 || len(fw.ActiveRules()) != 0 {
 		t.Fatalf("expected 5 expired sessions and 0 rules, got expired=%d rules=%d", expired, len(fw.ActiveRules()))
+	}
+}
+
+func TestCheckOut_TerminatesOnlyTargetRoomFlows(t *testing.T) {
+	var commands []string
+	fw := firewall.NewNftablesDriver(func(name string, args ...string) ([]byte, error) {
+		commands = append(commands, name+" "+strings.Join(args, " "))
+		return nil, nil
+	})
+	store := NewStore(fw, nil)
+	store.SeedDemoProperty()
+
+	// Bind one guest device in room 301 and one in room 302
+	if _, err := store.PairViaPortal("301", "Budi", "10.10.30.11", "aa:bb:cc:dd:ee:01"); err != nil {
+		t.Fatalf("PairViaPortal 301 failed: %v", err)
+	}
+	if _, err := store.PairViaPortal("302", "Siti", "10.10.30.22", "aa:bb:cc:dd:ee:02"); err != nil {
+		t.Fatalf("PairViaPortal 302 failed: %v", err)
+	}
+
+	commands = nil // reset to observe only CheckOut("301") commands
+	cleared, err := store.CheckOut("301")
+	if err != nil || cleared != 1 {
+		t.Fatalf("CheckOut 301 failed: cleared=%d err=%v", cleared, err)
+	}
+
+	var saw301Flush, saw302Flush bool
+	for _, cmd := range commands {
+		if strings.HasPrefix(cmd, "conntrack -D -s 10.10.30.11 ") {
+			saw301Flush = true
+		}
+		if strings.Contains(cmd, "10.10.30.22") {
+			saw302Flush = true
+		}
+	}
+	if !saw301Flush {
+		t.Fatalf("expected conntrack flush for room 301 guest 10.10.30.11, got commands: %v", commands)
+	}
+	if saw302Flush {
+		t.Fatalf("room 301 checkout must not touch room 302 flow, got commands: %v", commands)
 	}
 }
