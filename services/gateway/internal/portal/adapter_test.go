@@ -131,4 +131,29 @@ func TestPortalAdapter_RejectsInvalidSignatureOrUnknownRoom(t *testing.T) {
 			t.Fatalf("expected no firewall rules for unknown room")
 		}
 	})
+
+	t.Run("empty secret fails closed with 401", func(t *testing.T) {
+		h, _, _ := setupTestPortalHandler("")
+		body := []byte(`{"room":"301","guest_name":"Budi","ip":"10.10.30.97"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/portal/webhook/mikrotik", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 Unauthorized when secret is empty, got %d", rec.Code)
+		}
+	})
+
+	t.Run("oversized body returns 413", func(t *testing.T) {
+		h, _, _ := setupTestPortalHandler("correct-secret")
+		oversized := bytes.Repeat([]byte("a"), maxWebhookBodyBytes+10)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/portal/webhook/mikrotik", bytes.NewReader(oversized))
+		req.Header.Set("X-Inaply-Token", "correct-secret")
+		rec := httptest.NewRecorder()
+
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("expected 413 Request Entity Too Large, got %d", rec.Code)
+		}
+	})
 }

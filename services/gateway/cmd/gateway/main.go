@@ -92,6 +92,9 @@ func main() {
 	}()
 
 	apiServer := api.NewServer(store, fw)
+	if portalSecret := os.Getenv("INAPLY_PORTAL_SECRET"); portalSecret != "" {
+		apiServer.SetPortalWebhookSecret(portalSecret)
+	}
 	httpSrv := &http.Server{
 		Addr:              *httpAddr,
 		Handler:           apiServer.Handler(),

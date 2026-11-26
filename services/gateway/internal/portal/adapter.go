@@ -4,11 +4,14 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
 	"github.com/inaply/gateway/internal/session"
 )
+
+const maxWebhookBodyBytes = 64 * 1024
 
 var (
 	ErrUnauthorized   = errors.New("invalid portal webhook token")
@@ -34,8 +37,9 @@ type tokenValidator struct {
 }
 
 func (v tokenValidator) validate(headers http.Header) error {
+	// Fail-closed: empty secret must never disable webhook authentication.
 	if v.secret == "" {
-		return nil
+		return ErrUnauthorized
 	}
 	token := headers.Get("X-Inaply-Token")
 	if token == "" {
@@ -50,6 +54,21 @@ func (v tokenValidator) validate(headers http.Header) error {
 	return nil
 }
 
+func parseJSONWebhook[T any](v tokenValidator, headers http.Header, body []byte, toEvent func(T) (PortalEvent, bool)) (PortalEvent, error) {
+	if err := v.validate(headers); err != nil {
+		return PortalEvent{}, err
+	}
+	var payload T
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return PortalEvent{}, ErrInvalidPayload
+	}
+	ev, ok := toEvent(payload)
+	if !ok || ev.RoomNumber == "" || ev.GuestIP == "" {
+		return PortalEvent{}, ErrInvalidPayload
+	}
+	return ev, nil
+}
+
 // MikroTikAdapter handles MikroTik Hotspot login webhooks.
 type MikroTikAdapter struct {
 	tokenValidator
@@ -61,25 +80,22 @@ func NewMikroTikAdapter(secret string) *MikroTikAdapter {
 
 func (a *MikroTikAdapter) Vendor() string { return "mikrotik" }
 
+type mikrotikPayload struct {
+	Room      string `json:"room"`
+	GuestName string `json:"guest_name"`
+	IP        string `json:"ip"`
+	MAC       string `json:"mac"`
+}
+
 func (a *MikroTikAdapter) ParseWebhook(headers http.Header, body []byte) (PortalEvent, error) {
-	if err := a.validate(headers); err != nil {
-		return PortalEvent{}, err
-	}
-	var p struct {
-		Room      string `json:"room"`
-		GuestName string `json:"guest_name"`
-		IP        string `json:"ip"`
-		MAC       string `json:"mac"`
-	}
-	if err := json.Unmarshal(body, &p); err != nil || p.Room == "" || p.IP == "" {
-		return PortalEvent{}, ErrInvalidPayload
-	}
-	return PortalEvent{
-		RoomNumber: p.Room,
-		GuestName:  p.GuestName,
-		GuestIP:    p.IP,
-		GuestMAC:   p.MAC,
-	}, nil
+	return parseJSONWebhook(a.tokenValidator, headers, body, func(p mikrotikPayload) (PortalEvent, bool) {
+		return PortalEvent{
+			RoomNumber: p.Room,
+			GuestName:  p.GuestName,
+			GuestIP:    p.IP,
+			GuestMAC:   p.MAC,
+		}, true
+	})
 }
 
 // UniFiAdapter handles Ubiquiti UniFi Network external portal webhooks.
@@ -93,25 +109,22 @@ func NewUniFiAdapter(secret string) *UniFiAdapter {
 
 func (a *UniFiAdapter) Vendor() string { return "unifi" }
 
+type unifiPayload struct {
+	RoomNumber string `json:"room_number"`
+	GuestName  string `json:"guest_name"`
+	ClientIP   string `json:"client_ip"`
+	ClientMAC  string `json:"client_mac"`
+}
+
 func (a *UniFiAdapter) ParseWebhook(headers http.Header, body []byte) (PortalEvent, error) {
-	if err := a.validate(headers); err != nil {
-		return PortalEvent{}, err
-	}
-	var p struct {
-		RoomNumber string `json:"room_number"`
-		GuestName  string `json:"guest_name"`
-		ClientIP   string `json:"client_ip"`
-		ClientMAC  string `json:"client_mac"`
-	}
-	if err := json.Unmarshal(body, &p); err != nil || p.RoomNumber == "" || p.ClientIP == "" {
-		return PortalEvent{}, ErrInvalidPayload
-	}
-	return PortalEvent{
-		RoomNumber: p.RoomNumber,
-		GuestName:  p.GuestName,
-		GuestIP:    p.ClientIP,
-		GuestMAC:   p.ClientMAC,
-	}, nil
+	return parseJSONWebhook(a.tokenValidator, headers, body, func(p unifiPayload) (PortalEvent, bool) {
+		return PortalEvent{
+			RoomNumber: p.RoomNumber,
+			GuestName:  p.GuestName,
+			GuestIP:    p.ClientIP,
+			GuestMAC:   p.ClientMAC,
+		}, true
+	})
 }
 
 // RuijieAdapter handles Ruijie Cloud/Gateway captive portal webhooks.
@@ -125,25 +138,22 @@ func NewRuijieAdapter(secret string) *RuijieAdapter {
 
 func (a *RuijieAdapter) Vendor() string { return "ruijie" }
 
+type ruijiePayload struct {
+	RoomNo    string `json:"roomNo"`
+	GuestName string `json:"guestName"`
+	UserIP    string `json:"userIp"`
+	UserMAC   string `json:"userMac"`
+}
+
 func (a *RuijieAdapter) ParseWebhook(headers http.Header, body []byte) (PortalEvent, error) {
-	if err := a.validate(headers); err != nil {
-		return PortalEvent{}, err
-	}
-	var p struct {
-		RoomNo    string `json:"roomNo"`
-		GuestName string `json:"guestName"`
-		UserIP    string `json:"userIp"`
-		UserMAC   string `json:"userMac"`
-	}
-	if err := json.Unmarshal(body, &p); err != nil || p.RoomNo == "" || p.UserIP == "" {
-		return PortalEvent{}, ErrInvalidPayload
-	}
-	return PortalEvent{
-		RoomNumber: p.RoomNo,
-		GuestName:  p.GuestName,
-		GuestIP:    p.UserIP,
-		GuestMAC:   p.UserMAC,
-	}, nil
+	return parseJSONWebhook(a.tokenValidator, headers, body, func(p ruijiePayload) (PortalEvent, bool) {
+		return PortalEvent{
+			RoomNumber: p.RoomNo,
+			GuestName:  p.GuestName,
+			GuestIP:    p.UserIP,
+			GuestMAC:   p.UserMAC,
+		}, true
+	})
 }
 
 // OmadaAdapter handles TP-Link Omada Controller external portal webhooks.
@@ -157,25 +167,22 @@ func NewOmadaAdapter(secret string) *OmadaAdapter {
 
 func (a *OmadaAdapter) Vendor() string { return "omada" }
 
+type omadaPayload struct {
+	Room      string `json:"room"`
+	Name      string `json:"name"`
+	ClientIP  string `json:"clientIp"`
+	ClientMAC string `json:"clientMac"`
+}
+
 func (a *OmadaAdapter) ParseWebhook(headers http.Header, body []byte) (PortalEvent, error) {
-	if err := a.validate(headers); err != nil {
-		return PortalEvent{}, err
-	}
-	var p struct {
-		Room      string `json:"room"`
-		Name      string `json:"name"`
-		ClientIP  string `json:"clientIp"`
-		ClientMAC string `json:"clientMac"`
-	}
-	if err := json.Unmarshal(body, &p); err != nil || p.Room == "" || p.ClientIP == "" {
-		return PortalEvent{}, ErrInvalidPayload
-	}
-	return PortalEvent{
-		RoomNumber: p.Room,
-		GuestName:  p.Name,
-		GuestIP:    p.ClientIP,
-		GuestMAC:   p.ClientMAC,
-	}, nil
+	return parseJSONWebhook(a.tokenValidator, headers, body, func(p omadaPayload) (PortalEvent, bool) {
+		return PortalEvent{
+			RoomNumber: p.Room,
+			GuestName:  p.Name,
+			GuestIP:    p.ClientIP,
+			GuestMAC:   p.ClientMAC,
+		}, true
+	})
 }
 
 // NewWebhookHandler routes `/api/v1/portal/webhook/<vendor>` to the matching PortalAdapter
@@ -198,9 +205,17 @@ func NewWebhookHandler(store *session.Store, adapters ...PortalAdapter) http.Han
 			return
 		}
 
-		var buf [64 * 1024]byte
-		n, _ := r.Body.Read(buf[:])
-		ev, err := adapter.ParseWebhook(r.Header, buf[:n])
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookBodyBytes+1))
+		if err != nil {
+			http.Error(w, "failed to read request body", http.StatusBadRequest)
+			return
+		}
+		if len(body) > maxWebhookBodyBytes {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+
+		ev, err := adapter.ParseWebhook(r.Header, body)
 		if err != nil {
 			if errors.Is(err, ErrUnauthorized) {
 				http.Error(w, err.Error(), http.StatusUnauthorized)
