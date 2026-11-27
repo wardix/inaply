@@ -124,3 +124,63 @@ func TestPortalWebhookRouteIntegration(t *testing.T) {
 		t.Fatalf("expected 10.10.30.77 bound to room 301")
 	}
 }
+
+func TestGuestSelfService_DisconnectsOnlyOwnDevice(t *testing.T) {
+	fw := firewall.NewMemoryDriver()
+	store := session.NewStore(fw, nil)
+	store.SeedDemoProperty()
+
+	// Bind two devices in room 301 and one in room 302
+	if _, err := store.PairViaPortal("301", "Budi", "10.10.30.10", "aa:bb:cc:00:00:01"); err != nil {
+		t.Fatalf("PairViaPortal 301-A failed: %v", err)
+	}
+	if _, err := store.PairViaPortal("301", "Budi", "10.10.30.11", "aa:bb:cc:00:00:02"); err != nil {
+		t.Fatalf("PairViaPortal 301-B failed: %v", err)
+	}
+	if _, err := store.PairViaPortal("302", "Siti", "10.10.30.20", "aa:bb:cc:00:00:03"); err != nil {
+		t.Fatalf("PairViaPortal 302 failed: %v", err)
+	}
+
+	srv := NewServer(store, fw)
+
+	// 1. Cross-IP disconnect attempt must be rejected with 403 Forbidden
+	crossReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/guest/disconnect",
+		bytes.NewBufferString(`{"guest_ip":"10.10.30.20"}`),
+	)
+	crossReq.RemoteAddr = "10.10.30.10:51234"
+	crossReq.Header.Set("Content-Type", "application/json")
+	crossRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(crossRec, crossReq)
+	if crossRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for cross-IP disconnect, got %d", crossRec.Code)
+	}
+	if room, _ := store.ReceiversForGuestIP("10.10.30.20"); room == nil || room.RoomNumber != "302" {
+		t.Fatalf("expected 10.10.30.20 in room 302 to remain connected after 403")
+	}
+
+	// 2. Self-disconnect using RemoteAddr (with TCP port) disconnects only caller IP
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/guest/disconnect",
+		bytes.NewBufferString(`{}`),
+	)
+	req.RemoteAddr = "10.10.30.10:51234"
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rec.Code)
+	}
+	if room, _ := store.ReceiversForGuestIP("10.10.30.10"); room != nil {
+		t.Fatalf("expected 10.10.30.10 to be disconnected")
+	}
+	if room, _ := store.ReceiversForGuestIP("10.10.30.11"); room == nil || room.RoomNumber != "301" {
+		t.Fatalf("expected 10.10.30.11 in room 301 to remain connected")
+	}
+	if room, _ := store.ReceiversForGuestIP("10.10.30.20"); room == nil || room.RoomNumber != "302" {
+		t.Fatalf("expected 10.10.30.20 in room 302 to remain connected")
+	}
+}

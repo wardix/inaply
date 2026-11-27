@@ -58,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) routes() {
 	s.mux.HandleFunc("/healthz", s.handleHealth)
 	s.mux.HandleFunc("/api/v1/pair/portal", s.handlePairPortal)
+	s.mux.HandleFunc("/api/v1/guest/disconnect", s.handleGuestDisconnect)
 	s.mux.HandleFunc("/api/v1/portal/webhook/", func(w http.ResponseWriter, r *http.Request) {
 		s.portalHandler.ServeHTTP(w, r)
 	})
@@ -429,3 +430,24 @@ async function checkout(room){
   location.reload();
 }
 </script></body></html>`
+
+func (s *Server) handleGuestDisconnect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		GuestIP string `json:"guest_ip"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	callerIP := resolveClientIP("", r)
+	if req.GuestIP != "" && req.GuestIP != callerIP {
+		writeError(w, http.StatusForbidden, "cannot disconnect another device")
+		return
+	}
+	if err := s.store.DisconnectGuestIP(callerIP); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected", "guest_ip": callerIP})
+}

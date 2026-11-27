@@ -149,6 +149,7 @@ type TVMessageView struct {
 type TVBackdropState struct {
 	RoomNumber          string          `json:"room_number"`
 	DeviceID            string          `json:"device_id"`
+	DeviceStatus        string          `json:"device_status,omitempty"`
 	DeviceLabel         string          `json:"device_label"`
 	Occupied            bool            `json:"occupied"`
 	GuestName           string          `json:"guest_name,omitempty"`
