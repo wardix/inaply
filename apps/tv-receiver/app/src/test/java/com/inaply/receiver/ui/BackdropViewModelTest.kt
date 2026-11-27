@@ -15,6 +15,8 @@ class BackdropViewModelTest {
             TVBackdropState(
                 roomNumber = "301",
                 deviceId = "tv-301-main",
+                occupied = true,
+                guestName = "Budi",
                 hotelName = "Grand Inaply Hotel",
                 welcomeTitle = "Welcome, Budi",
                 welcomeSubtitle = "Enjoy your stay",
@@ -24,16 +26,21 @@ class BackdropViewModelTest {
                 activePairedDevices = 1,
                 resetEpoch = 1L
             ),
-            occupied = true,
-            guestName = "Budi"
+            localTime = "19:30",
+            logoUrl = "https://cdn.inaply.local/logo.png",
+            themeColor = "#0F172A"
         )
         assertEquals("Welcome, Budi", vm.uiState.greetingTitle)
+        assertEquals("19:30", vm.uiState.localTime)
+        assertEquals("#0F172A", vm.uiState.themeColor)
 
         // Vacant room -> fallback to property title
         vm.onGatewayState(
             TVBackdropState(
                 roomNumber = "301",
                 deviceId = "tv-301-main",
+                occupied = false,
+                guestName = "",
                 hotelName = "Grand Inaply Hotel",
                 welcomeTitle = "",
                 welcomeSubtitle = "Connect to Wi-Fi to cast",
@@ -42,9 +49,7 @@ class BackdropViewModelTest {
                 pairingUrl = "http://192.168.10.1/pair?pin=112233",
                 activePairedDevices = 0,
                 resetEpoch = 2L
-            ),
-            occupied = false,
-            guestName = ""
+            )
         )
         assertEquals("Welcome to Grand Inaply Hotel", vm.uiState.greetingTitle)
     }
@@ -56,6 +61,8 @@ class BackdropViewModelTest {
             TVBackdropState(
                 roomNumber = "302",
                 deviceId = "tv-302-main",
+                occupied = true,
+                guestName = "Siti",
                 hotelName = "Grand Inaply Hotel",
                 welcomeTitle = "Welcome, Siti",
                 welcomeSubtitle = "Enjoy your stay",
@@ -64,9 +71,7 @@ class BackdropViewModelTest {
                 pairingUrl = "http://192.168.10.1/pair?pin=998877",
                 activePairedDevices = 3,
                 resetEpoch = 1L
-            ),
-            occupied = true,
-            guestName = "Siti"
+            )
         )
 
         assertEquals(3, vm.uiState.activePairedDevices)

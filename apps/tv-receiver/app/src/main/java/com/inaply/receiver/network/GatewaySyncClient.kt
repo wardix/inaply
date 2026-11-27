@@ -22,6 +22,8 @@ data class BackdropMessage(
 data class TVBackdropState(
     val roomNumber: String,
     val deviceId: String,
+    val occupied: Boolean = false,
+    val guestName: String = "",
     val hotelName: String,
     val welcomeTitle: String,
     val welcomeSubtitle: String,

@@ -11,7 +11,10 @@ data class BackdropUiState(
     val pairingPin: String = "",
     val pairingUrl: String = "",
     val activePairedDevices: Int = 0,
-    val occupied: Boolean = false
+    val occupied: Boolean = false,
+    val logoUrl: String = "",
+    val themeColor: String = "#1E293B",
+    val localTime: String = ""
 )
 
 /**
@@ -23,12 +26,13 @@ class BackdropViewModel {
 
     fun onGatewayState(
         state: TVBackdropState,
-        occupied: Boolean,
-        guestName: String
+        localTime: String = "",
+        logoUrl: String = "",
+        themeColor: String = "#1E293B"
     ) {
         val greeting = when {
-            occupied && guestName.isNotBlank() -> "Welcome, $guestName"
-            occupied && state.welcomeTitle.isNotBlank() -> state.welcomeTitle
+            state.occupied && state.guestName.isNotBlank() -> "Welcome, ${state.guestName}"
+            state.occupied && state.welcomeTitle.isNotBlank() -> state.welcomeTitle
             state.hotelName.isNotBlank() -> "Welcome to ${state.hotelName}"
             else -> "Welcome"
         }
@@ -42,7 +46,10 @@ class BackdropViewModel {
             pairingPin = state.pairingPin,
             pairingUrl = state.pairingUrl,
             activePairedDevices = state.activePairedDevices,
-            occupied = occupied
+            occupied = state.occupied,
+            logoUrl = logoUrl,
+            themeColor = themeColor,
+            localTime = localTime
         )
     }
 }
