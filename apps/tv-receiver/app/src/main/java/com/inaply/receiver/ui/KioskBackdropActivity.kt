@@ -44,7 +44,8 @@ class KioskBackdropActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         deviceOwnerManager = DeviceOwnerManager(this)
         gatewaySyncClient = GatewaySyncClient("http://192.168.10.1:8080", "tv-301-main")
-        deviceOwnerManager.enableKioskLockTask(this)
+        deviceOwnerManager.applyHospitalityRestrictions(this)
+        uiState = viewModel.uiState
 
         setContent {
             MaterialTheme {
