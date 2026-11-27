@@ -594,6 +594,7 @@ func (s *Store) TVState(deviceID string) (*models.TVBackdropState, error) {
 	return &models.TVBackdropState{
 		RoomNumber:          room.RoomNumber,
 		DeviceID:            rcv.DeviceID,
+		DeviceStatus:        rcv.Status,
 		DeviceLabel:         rcv.Label,
 		Occupied:            room.Occupied,
 		GuestName:           room.GuestName,
@@ -714,6 +715,22 @@ func (s *Store) ListRoomsAndSessions() ([]models.Room, []models.GuestSession, []
 	sort.Slice(receivers, func(i, j int) bool { return receivers[i].DeviceID < receivers[j].DeviceID })
 
 	return rooms, sessions, receivers
+}
+
+// DisconnectGuestIP revokes only the session and firewall pairs belonging to guestIP.
+func (s *Store) DisconnectGuestIP(guestIP string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sess, ok := s.sessions[guestIP]
+	if !ok {
+		return nil
+	}
+	for _, rcv := range s.receiversForRoomLocked(sess.RoomNumber) {
+		_ = s.fw.RevokePair(sess.GuestIP, rcv.IP)
+	}
+	delete(s.sessions, guestIP)
+	return s.persistLocked()
 }
 
 // HandleRadiusAccounting synchronizes guest IP/MAC changes (roaming & MAC randomization)

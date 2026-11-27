@@ -124,3 +124,53 @@ func TestPortalWebhookRouteIntegration(t *testing.T) {
 		t.Fatalf("expected 10.10.30.77 bound to room 301")
 	}
 }
+
+func TestGuestSelfService_DisconnectsOnlyOwnDevice(t *testing.T) {
+	fw := firewall.NewMemoryDriver()
+	store := session.NewStore(fw, nil)
+	store.SeedDemoProperty()
+
+	// Bind two devices in room 301 and one in room 302
+	if _, err := store.PairViaPortal("301", "Budi", "10.10.30.10", "aa:bb:cc:00:00:01"); err != nil {
+		t.Fatalf("PairViaPortal 301-A failed: %v", err)
+	}
+	if _, err := store.PairViaPortal("301", "Budi", "10.10.30.11", "aa:bb:cc:00:00:02"); err != nil {
+		t.Fatalf("PairViaPortal 301-B failed: %v", err)
+	}
+	if _, err := store.PairViaPortal("302", "Siti", "10.10.30.20", "aa:bb:cc:00:00:03"); err != nil {
+		t.Fatalf("PairViaPortal 302 failed: %v", err)
+	}
+
+	srv := NewServer(store, fw)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	req, err := http.NewRequest(
+		http.MethodPost,
+		ts.URL+"/api/v1/guest/disconnect",
+		bytes.NewBufferString(`{"guest_ip":"10.10.30.10"}`),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest failed: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+	if room, _ := store.ReceiversForGuestIP("10.10.30.10"); room != nil {
+		t.Fatalf("expected 10.10.30.10 to be disconnected")
+	}
+	if room, _ := store.ReceiversForGuestIP("10.10.30.11"); room == nil || room.RoomNumber != "301" {
+		t.Fatalf("expected 10.10.30.11 in room 301 to remain connected")
+	}
+	if room, _ := store.ReceiversForGuestIP("10.10.30.20"); room == nil || room.RoomNumber != "302" {
+		t.Fatalf("expected 10.10.30.20 in room 302 to remain connected")
+	}
+}
