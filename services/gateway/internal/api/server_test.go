@@ -142,27 +142,37 @@ func TestGuestSelfService_DisconnectsOnlyOwnDevice(t *testing.T) {
 	}
 
 	srv := NewServer(store, fw)
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
 
-	req, err := http.NewRequest(
+	// 1. Cross-IP disconnect attempt must be rejected with 403 Forbidden
+	crossReq := httptest.NewRequest(
 		http.MethodPost,
-		ts.URL+"/api/v1/guest/disconnect",
-		bytes.NewBufferString(`{"guest_ip":"10.10.30.10"}`),
+		"/api/v1/guest/disconnect",
+		bytes.NewBufferString(`{"guest_ip":"10.10.30.20"}`),
 	)
-	if err != nil {
-		t.Fatalf("NewRequest failed: %v", err)
+	crossReq.RemoteAddr = "10.10.30.10:51234"
+	crossReq.Header.Set("Content-Type", "application/json")
+	crossRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(crossRec, crossReq)
+	if crossRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for cross-IP disconnect, got %d", crossRec.Code)
 	}
+	if room, _ := store.ReceiversForGuestIP("10.10.30.20"); room == nil || room.RoomNumber != "302" {
+		t.Fatalf("expected 10.10.30.20 in room 302 to remain connected after 403")
+	}
+
+	// 2. Self-disconnect using RemoteAddr (with TCP port) disconnects only caller IP
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/guest/disconnect",
+		bytes.NewBufferString(`{}`),
+	)
+	req.RemoteAddr = "10.10.30.10:51234"
 	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do failed: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rec.Code)
 	}
 	if room, _ := store.ReceiversForGuestIP("10.10.30.10"); room != nil {
 		t.Fatalf("expected 10.10.30.10 to be disconnected")

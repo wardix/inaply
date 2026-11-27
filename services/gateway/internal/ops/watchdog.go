@@ -39,13 +39,13 @@ func (w *Watchdog) ProbeOnce() {
 		if w.probe(rcv.IP) {
 			w.failures[rcv.DeviceID] = 0
 			if rcv.Status == "offline" || rcv.Status == "" {
-				_ = w.store.Heartbeat(rcv.DeviceID, "idle", rcv.AppVersion, false)
+				_ = w.store.Heartbeat(rcv.DeviceID, "idle", rcv.AppVersion, rcv.HDMICEC)
 			}
 			continue
 		}
 		w.failures[rcv.DeviceID]++
 		if w.failures[rcv.DeviceID] >= w.threshold && rcv.Status != "offline" {
-			_ = w.store.Heartbeat(rcv.DeviceID, "offline", rcv.AppVersion, false)
+			_ = w.store.Heartbeat(rcv.DeviceID, "offline", rcv.AppVersion, rcv.HDMICEC)
 		}
 	}
 }

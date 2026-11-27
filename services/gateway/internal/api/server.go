@@ -440,12 +440,14 @@ func (s *Server) handleGuestDisconnect(w http.ResponseWriter, r *http.Request) {
 		GuestIP string `json:"guest_ip"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	if req.GuestIP == "" {
-		req.GuestIP = r.RemoteAddr
+	callerIP := resolveClientIP("", r)
+	if req.GuestIP != "" && req.GuestIP != callerIP {
+		writeError(w, http.StatusForbidden, "cannot disconnect another device")
+		return
 	}
-	if err := s.store.DisconnectGuestIP(req.GuestIP); err != nil {
+	if err := s.store.DisconnectGuestIP(callerIP); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected", "guest_ip": req.GuestIP})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected", "guest_ip": callerIP})
 }
