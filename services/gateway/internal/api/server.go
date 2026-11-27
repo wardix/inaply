@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inaply/gateway/internal/assets"
 	"github.com/inaply/gateway/internal/firewall"
 	"github.com/inaply/gateway/internal/models"
 	"github.com/inaply/gateway/internal/portal"
@@ -20,6 +21,7 @@ type Server struct {
 	fw            firewall.Driver
 	mux           *http.ServeMux
 	portalHandler http.Handler
+	assetCache    *assets.Cache
 }
 
 func NewServer(store *session.Store, fw firewall.Driver) *Server {
@@ -31,6 +33,11 @@ func NewServer(store *session.Store, fw firewall.Driver) *Server {
 	s.SetPortalWebhookSecret("")
 	s.routes()
 	return s
+}
+
+// SetAssetCache configures the local LAN asset cache served at /assets/.
+func (s *Server) SetAssetCache(cache *assets.Cache) {
+	s.assetCache = cache
 }
 
 // SetPortalWebhookSecret configures the shared secret for vendor portal webhooks.
@@ -53,6 +60,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/v1/pair/portal", s.handlePairPortal)
 	s.mux.HandleFunc("/api/v1/portal/webhook/", func(w http.ResponseWriter, r *http.Request) {
 		s.portalHandler.ServeHTTP(w, r)
+	})
+	s.mux.HandleFunc("/assets/", func(w http.ResponseWriter, r *http.Request) {
+		if s.assetCache == nil {
+			http.NotFound(w, r)
+			return
+		}
+		s.assetCache.Handler().ServeHTTP(w, r)
 	})
 	s.mux.HandleFunc("/api/v1/pair/pin", s.handlePairPIN)
 	s.mux.HandleFunc("/api/v1/tv/state", s.handleTVState)
