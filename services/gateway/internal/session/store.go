@@ -283,6 +283,13 @@ func (s *Store) persistLocked() error {
 	return s.persist(s.snapshotLocked())
 }
 
+func (s *Store) UpsertRoom(room models.Room) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	copyRoom := room
+	s.rooms[room.RoomNumber] = &copyRoom
+}
+
 func (s *Store) UpsertReceiver(rcv models.ReceiverDevice) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
