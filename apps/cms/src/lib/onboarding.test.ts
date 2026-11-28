@@ -9,6 +9,7 @@ describe("Property -> Gateway -> Room -> Receiver Onboarding", () => {
     const propB = store.createProperty({ partnerId: "partner-1", name: "Hotel B" });
 
     const gwA = store.createGateway({ propertyId: propA.id, name: "GW-A" });
+    const gwB = store.createGateway({ propertyId: propB.id, name: "GW-B" });
     const room301A = store.createRoom({ propertyId: propA.id, roomNumber: "301" });
     expect(room301A.roomNumber).toBe("301");
 
@@ -23,9 +24,14 @@ describe("Property -> Gateway -> Room -> Receiver Onboarding", () => {
     const rcv1 = store.createReceiver({ gatewayId: gwA.id, roomId: room301A.id, deviceId: "tv-301-main" });
     expect(rcv1.deviceId).toBe("tv-301-main");
 
+    // Cross-property gateway + room -> rejected
+    expect(() =>
+      store.createReceiver({ gatewayId: gwA.id, roomId: room301B.id, deviceId: "tv-301-cross" })
+    ).toThrow();
+
     // Duplicate global device_id -> rejected
     expect(() =>
-      store.createReceiver({ gatewayId: gwA.id, roomId: room301B.id, deviceId: "tv-301-main" })
+      store.createReceiver({ gatewayId: gwB.id, roomId: room301B.id, deviceId: "tv-301-main" })
     ).toThrow();
   });
 });

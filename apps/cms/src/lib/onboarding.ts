@@ -67,11 +67,16 @@ export class OnboardingStore {
   }
 
   createReceiver(input: { gatewayId: string; roomId: string; deviceId: string }): Receiver {
-    if (!this.gateways.has(input.gatewayId)) {
+    const gw = this.gateways.get(input.gatewayId);
+    if (!gw) {
       throw new Error(`Unknown gateway ${input.gatewayId}`);
     }
-    if (!this.rooms.has(input.roomId)) {
+    const room = this.rooms.get(input.roomId);
+    if (!room) {
       throw new Error(`Unknown room ${input.roomId}`);
+    }
+    if (gw.propertyId !== room.propertyId) {
+      throw new Error(`Cross-property mismatch: gateway ${gw.id} and room ${room.id} belong to different properties`);
     }
     if (this.deviceIds.has(input.deviceId)) {
       throw new Error(`Duplicate global device_id ${input.deviceId}`);
