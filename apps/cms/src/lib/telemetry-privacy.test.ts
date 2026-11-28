@@ -28,8 +28,8 @@ describe("Telemetry Privacy", () => {
       ad_id: "ad-spa-1",
       timestamp: "2026-11-28T14:00:00Z",
     });
-    expect((stored[0] as Record<string, unknown>).video_url).toBeUndefined();
-    expect((stored[0] as Record<string, unknown>).app_name).toBeUndefined();
-    expect((stored[0] as Record<string, unknown>).media_title).toBeUndefined();
+    expect("video_url" in stored[0]).toBe(false);
+    expect("app_name" in stored[0]).toBe(false);
+    expect("media_title" in stored[0]).toBe(false);
   });
 });

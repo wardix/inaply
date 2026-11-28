@@ -36,7 +36,7 @@ export function createAnalyticsService(opts: AnalyticsServiceOptions = {}) {
       const protocol = typeof raw.protocol === "string" ? raw.protocol : "";
       const session_duration =
         typeof raw.session_duration === "number" && Number.isFinite(raw.session_duration)
-          ? raw.session_duration
+          ? Math.max(0, raw.session_duration)
           : 0;
       const timestamp =
         typeof raw.timestamp === "string" && raw.timestamp
@@ -75,6 +75,14 @@ export function createAnalyticsService(opts: AnalyticsServiceOptions = {}) {
     }): { status: 302 | 404; location?: string } {
       const ad = registeredAds.get(input.ad_id);
       if (!ad || ad.property_id !== input.property_id) {
+        return { status: 404 };
+      }
+      try {
+        const parsed = new URL(ad.cta_url);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          return { status: 404 };
+        }
+      } catch {
         return { status: 404 };
       }
       const key = `${ad.property_id}:${ad.ad_id}`;
