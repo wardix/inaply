@@ -39,7 +39,7 @@ type ReceiverDevice struct {
 	ModelName      string    `json:"model_name"`
 	AppVersion     string    `json:"app_version,omitempty"`
 	HDMICEC        bool      `json:"hdmi_cec_attached"`
-	Mode           string    `json:"mode,omitempty"`        // "room_tv" | "signage"
+	Mode           string    `json:"mode,omitempty"`        // "room_tv" | "signage" | "meeting_room"
 	Orientation    string    `json:"orientation,omitempty"` // "landscape" | "portrait"
 	Status         string    `json:"status"`
 	LastSeenAt     time.Time `json:"last_seen_at"`

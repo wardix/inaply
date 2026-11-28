@@ -341,10 +341,8 @@ func TestMeetingRoomIsolation(t *testing.T) {
 	store.SeedDemoProperty()
 
 	// Seed Meeting Room A and Meeting Room B with meeting_room projectors
-	store.mu.Lock()
-	store.rooms["MEETING-A"] = &models.Room{RoomNumber: "MEETING-A", CurrentPIN: "111111"}
-	store.rooms["MEETING-B"] = &models.Room{RoomNumber: "MEETING-B", CurrentPIN: "222222"}
-	store.mu.Unlock()
+	store.UpsertRoom(models.Room{RoomNumber: "MEETING-A", CurrentPIN: "111111", PINExpires: time.Now().Add(time.Hour)})
+	store.UpsertRoom(models.Room{RoomNumber: "MEETING-B", CurrentPIN: "222222", PINExpires: time.Now().Add(time.Hour)})
 	store.CheckIn("MEETING-A", "Summit Organizer", models.SegmentCorporate, time.Now().Add(2*time.Hour))
 	store.CheckIn("MEETING-B", "Wedding Organizer", models.SegmentCorporate, time.Now().Add(2*time.Hour))
 
@@ -367,9 +365,19 @@ func TestMeetingRoomIsolation(t *testing.T) {
 		Status:     "online",
 	})
 
-	// Presenter pairs to Meeting Room A
-	if _, err := store.PairViaPortal("MEETING-A", "Summit Organizer", "10.10.30.150", "aa:bb:cc:11:22:33"); err != nil {
-		t.Fatalf("PairViaPortal for MEETING-A failed: %v", err)
+	// Presenter pairs to Meeting Room A via PIN (wrong PIN must fail)
+	if _, err := store.PairViaPIN("999999", "10.10.30.150", "aa:bb:cc:11:22:33"); err == nil {
+		t.Fatalf("expected PairViaPIN with wrong PIN to fail")
+	}
+	rooms, _, _ := store.ListRoomsAndSessions()
+	var pinA string
+	for _, r := range rooms {
+		if r.RoomNumber == "MEETING-A" {
+			pinA = r.CurrentPIN
+		}
+	}
+	if _, err := store.PairViaPIN(pinA, "10.10.30.150", "aa:bb:cc:11:22:33"); err != nil {
+		t.Fatalf("PairViaPIN for MEETING-A failed: %v", err)
 	}
 
 	room, rcvs := store.ReceiversForGuestIP("10.10.30.150")
@@ -378,5 +386,22 @@ func TestMeetingRoomIsolation(t *testing.T) {
 	}
 	if len(rcvs) != 1 || rcvs[0].DeviceID != "proj-meeting-a" {
 		t.Fatalf("expected only proj-meeting-a, got %+v", rcvs)
+	}
+
+	// Verify firewall rules allow ONLY proj-meeting-a (10.10.20.201) and NOT proj-meeting-b (10.10.20.202) or guest TVs
+	var hasA, hasB bool
+	for _, rule := range fw.ActiveRules() {
+		if rule.GuestIP == "10.10.30.150" && rule.ReceiverIP == "10.10.20.201" {
+			hasA = true
+		}
+		if rule.GuestIP == "10.10.30.150" && rule.ReceiverIP == "10.10.20.202" {
+			hasB = true
+		}
+	}
+	if !hasA {
+		t.Fatalf("expected firewall rule allowing 10.10.30.150 -> 10.10.20.201")
+	}
+	if hasB {
+		t.Fatalf("presenter in MEETING-A must NOT reach MEETING-B projector 10.10.20.202")
 	}
 }
