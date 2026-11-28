@@ -84,7 +84,33 @@ class GatewaySyncClientTest {
         val state = GatewaySyncClient.parseStateJson(json)
         assertEquals("302", state.roomNumber)
         assertFalse(state.occupied)
+        assertEquals("room_tv", state.mode)
+        assertEquals("landscape", state.orientation)
         assertTrue(state.ads.isEmpty())
         assertTrue(state.messages.isEmpty())
+    }
+
+    @Test
+    fun `parseStateJson parses signage mode and portrait orientation`() {
+        val json = """
+            {
+              "room_number": "",
+              "device_id": "tv-lift-1",
+              "mode": "signage",
+              "orientation": "portrait",
+              "hotel_name": "Grand Inaply",
+              "welcome_title": "Spa Promo",
+              "welcome_subtitle": "",
+              "wifi_ssid": "",
+              "pairing_pin": "",
+              "pairing_url": "",
+              "active_paired_devices": 0,
+              "reset_epoch": 0
+            }
+        """.trimIndent()
+
+        val state = GatewaySyncClient.parseStateJson(json)
+        assertEquals("signage", state.mode)
+        assertEquals("portrait", state.orientation)
     }
 }

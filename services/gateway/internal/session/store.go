@@ -282,6 +282,13 @@ func (s *Store) persistLocked() error {
 	return s.persist(s.snapshotLocked())
 }
 
+func (s *Store) UpsertReceiver(rcv models.ReceiverDevice) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	copyRcv := rcv
+	s.receivers[rcv.DeviceID] = &copyRcv
+}
+
 func (s *Store) receiversForRoomLocked(roomNumber string) []models.ReceiverDevice {
 	var list []models.ReceiverDevice
 	for _, r := range s.receivers {
@@ -438,6 +445,11 @@ func (s *Store) bindGuestLocked(room *models.Room, guestIP, guestMAC, guestName 
 	receivers := s.receiversForRoomLocked(room.RoomNumber)
 	if len(receivers) == 0 {
 		return nil, ErrRoomNotConfigured
+	}
+	for _, rcv := range receivers {
+		if rcv.Mode == "signage" {
+			return nil, errors.New("guest pairing is not allowed on signage devices")
+		}
 	}
 
 	// If this guest IP was previously bound to another room, revoke old room firewall rules first.

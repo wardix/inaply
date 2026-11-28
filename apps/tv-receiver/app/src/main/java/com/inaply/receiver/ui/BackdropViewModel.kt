@@ -14,7 +14,9 @@ data class BackdropUiState(
     val occupied: Boolean = false,
     val logoUrl: String = "",
     val themeColor: String = "#1E293B",
-    val localTime: String = ""
+    val localTime: String = "",
+    val mode: String = "room_tv",
+    val orientation: String = "landscape"
 )
 
 /**
@@ -49,7 +51,9 @@ class BackdropViewModel {
             occupied = state.occupied,
             logoUrl = logoUrl,
             themeColor = themeColor,
-            localTime = localTime
+            localTime = localTime,
+            mode = state.mode,
+            orientation = state.orientation
         )
     }
 }

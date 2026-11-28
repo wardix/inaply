@@ -64,4 +64,33 @@ describe("Signage Multi-Zone Schedule", () => {
       svc.resolveActivePlaylist("prop-1", "restaurant", new Date("2026-11-28T04:00:00Z"))
     ).toBe("lunch-special");
   });
+
+  test("instant campaign sync pushes room promo to matching signage zones", () => {
+    const svc = createSignageService();
+    svc.registerDisplay({
+      deviceId: "dev-lobby-1",
+      propertyId: "prop-1",
+      mode: "signage",
+      zone: "lobby",
+      orientation: "landscape",
+    });
+    svc.registerDisplay({
+      deviceId: "dev-room-301",
+      propertyId: "prop-1",
+      mode: "room_tv",
+      zone: "room",
+      orientation: "landscape",
+    });
+
+    const syncedEvents: Array<{ deviceId: string; campaignId: string }> = [];
+    const count = svc.syncCampaignToSignage({
+      propertyId: "prop-1",
+      campaignId: "camp-spa-50",
+      zones: ["lobby", "lift"],
+      onSync: (ev) => syncedEvents.push({ deviceId: ev.deviceId, campaignId: ev.campaignId }),
+    });
+
+    expect(count).toBe(1);
+    expect(syncedEvents).toEqual([{ deviceId: "dev-lobby-1", campaignId: "camp-spa-50" }]);
+  });
 });

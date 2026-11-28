@@ -39,6 +39,8 @@ type ReceiverDevice struct {
 	ModelName      string    `json:"model_name"`
 	AppVersion     string    `json:"app_version,omitempty"`
 	HDMICEC        bool      `json:"hdmi_cec_attached"`
+	Mode           string    `json:"mode,omitempty"`        // "room_tv" | "signage"
+	Orientation    string    `json:"orientation,omitempty"` // "landscape" | "portrait"
 	Status         string    `json:"status"`
 	LastSeenAt     time.Time `json:"last_seen_at"`
 }
@@ -151,6 +153,8 @@ type TVBackdropState struct {
 	DeviceID            string          `json:"device_id"`
 	DeviceStatus        string          `json:"device_status,omitempty"`
 	DeviceLabel         string          `json:"device_label"`
+	Mode                string          `json:"mode,omitempty"`
+	Orientation         string          `json:"orientation,omitempty"`
 	Occupied            bool            `json:"occupied"`
 	GuestName           string          `json:"guest_name,omitempty"`
 	Segment             GuestSegment    `json:"segment"`
