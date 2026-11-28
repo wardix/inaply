@@ -310,3 +310,27 @@ func TestSignageDevice_RejectsPairViaPortalAndPairViaPIN(t *testing.T) {
 		t.Fatalf("expected PairViaPIN to reject signage device")
 	}
 }
+
+func TestTVState_SignageDeviceWithoutRoom(t *testing.T) {
+	fw := firewall.NewMemoryDriver()
+	store := NewStore(fw, nil)
+	store.SeedDemoProperty()
+
+	store.UpsertReceiver(models.ReceiverDevice{
+		DeviceID:    "tv-lift-1",
+		RoomNumber:  "",
+		Label:       "Lift Display",
+		IP:          "10.10.20.88",
+		Mode:        "signage",
+		Orientation: "portrait",
+		Status:      "online",
+	})
+
+	state, err := store.TVState("tv-lift-1")
+	if err != nil {
+		t.Fatalf("expected TVState for signage device without room to succeed, got %v", err)
+	}
+	if state.Mode != "signage" || state.Orientation != "portrait" {
+		t.Fatalf("expected mode=signage, orientation=portrait, got mode=%q orientation=%q", state.Mode, state.Orientation)
+	}
+}

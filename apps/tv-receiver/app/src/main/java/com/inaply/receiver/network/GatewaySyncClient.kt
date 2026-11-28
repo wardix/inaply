@@ -109,8 +109,8 @@ class GatewaySyncClient(
                 pairingUrl = obj.optString("pairing_url", ""),
                 activePairedDevices = obj.optInt("active_paired_devices", 0),
                 resetEpoch = obj.optLong("reset_epoch", 0L),
-                mode = obj.optString("mode", "room_tv"),
-                orientation = obj.optString("orientation", "landscape"),
+                mode = obj.optString("mode", "room_tv").ifBlank { "room_tv" },
+                orientation = obj.optString("orientation", "landscape").ifBlank { "landscape" },
                 ads = adsList,
                 messages = msgList
             )

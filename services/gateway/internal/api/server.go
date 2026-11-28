@@ -429,6 +429,8 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, session.ErrGuestMismatch), errors.Is(err, session.ErrInvalidPIN):
 		writeError(w, http.StatusUnauthorized, err.Error())
+	case errors.Is(err, session.ErrSignagePairingForbidden):
+		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, session.ErrInvalidGuestIP), errors.Is(err, session.ErrRoomNotConfigured):
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:

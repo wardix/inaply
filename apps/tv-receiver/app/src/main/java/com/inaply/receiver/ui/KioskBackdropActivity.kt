@@ -145,10 +145,13 @@ class KioskBackdropActivity : ComponentActivity() {
 
                 runOnUiThread {
                     uiState = viewModel.uiState
-                    requestedOrientation = if (uiState.orientation == "portrait") {
+                    val targetOrientation = if (uiState.orientation == "portrait") {
                         ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                     } else {
                         ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                    }
+                    if (requestedOrientation != targetOrientation) {
+                        requestedOrientation = targetOrientation
                     }
                     currentAd = adScheduler.currentAd()
                     currentOverlay = coordinator.currentOverlay
