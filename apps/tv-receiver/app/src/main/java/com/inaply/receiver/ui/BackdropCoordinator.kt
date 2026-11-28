@@ -15,14 +15,7 @@ class BackdropCoordinator(
     private val overlayReducer: MessageOverlayReducer,
     private val onCheckoutReset: () -> Unit = {}
 ) {
-    private val resetWatcher = CheckoutResetWatcher(initialEpoch = 0L) {
-        pairingWidgetState = PairingWidgetState.fromGateway(
-            activePairedDevices = 0,
-            pairingPin = pairingWidgetState.pairingPin,
-            pairingUrl = pairingWidgetState.pairingUrl
-        )
-        onCheckoutReset()
-    }
+    private var resetWatcher: CheckoutResetWatcher? = null
 
     var currentOverlay: BackdropMessage? = null
         private set
@@ -44,7 +37,7 @@ class BackdropCoordinator(
         val prev = overlayReducer.currentOverlay()
         overlayReducer.advanceSeconds(seconds)
         val next = overlayReducer.currentOverlay()
-        if (prev != null && next == null && prev.priority == "normal") {
+        if (prev != null && next == null && prev.priority.equals("normal", ignoreCase = true)) {
             deduplicator.markDismissed(prev.id)
         }
         currentOverlay = next
@@ -63,6 +56,18 @@ class BackdropCoordinator(
     }
 
     fun onResetEpochPolled(resetEpoch: Long) {
-        resetWatcher.onResetEpoch(resetEpoch)
+        val watcher = resetWatcher
+        if (watcher == null) {
+            resetWatcher = CheckoutResetWatcher(initialEpoch = resetEpoch) {
+                pairingWidgetState = PairingWidgetState.fromGateway(
+                    activePairedDevices = 0,
+                    pairingPin = pairingWidgetState.pairingPin,
+                    pairingUrl = pairingWidgetState.pairingUrl
+                )
+                onCheckoutReset()
+            }
+            return
+        }
+        watcher.onResetEpoch(resetEpoch)
     }
 }
