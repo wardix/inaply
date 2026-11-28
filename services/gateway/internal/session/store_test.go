@@ -334,3 +334,49 @@ func TestTVState_SignageDeviceWithoutRoom(t *testing.T) {
 		t.Fatalf("expected mode=signage, orientation=portrait, got mode=%q orientation=%q", state.Mode, state.Orientation)
 	}
 }
+
+func TestMeetingRoomIsolation(t *testing.T) {
+	fw := firewall.NewMemoryDriver()
+	store := NewStore(fw, nil)
+	store.SeedDemoProperty()
+
+	// Seed Meeting Room A and Meeting Room B with meeting_room projectors
+	store.mu.Lock()
+	store.rooms["MEETING-A"] = &models.Room{RoomNumber: "MEETING-A", CurrentPIN: "111111"}
+	store.rooms["MEETING-B"] = &models.Room{RoomNumber: "MEETING-B", CurrentPIN: "222222"}
+	store.mu.Unlock()
+	store.CheckIn("MEETING-A", "Summit Organizer", models.SegmentCorporate, time.Now().Add(2*time.Hour))
+	store.CheckIn("MEETING-B", "Wedding Organizer", models.SegmentCorporate, time.Now().Add(2*time.Hour))
+
+	store.UpsertReceiver(models.ReceiverDevice{
+		DeviceID:   "proj-meeting-a",
+		RoomNumber: "MEETING-A",
+		Label:      "Ballroom A Projector",
+		IP:         "10.10.20.201",
+		CastPort:   8009,
+		Mode:       "meeting_room",
+		Status:     "online",
+	})
+	store.UpsertReceiver(models.ReceiverDevice{
+		DeviceID:   "proj-meeting-b",
+		RoomNumber: "MEETING-B",
+		Label:      "Ballroom B Projector",
+		IP:         "10.10.20.202",
+		CastPort:   8009,
+		Mode:       "meeting_room",
+		Status:     "online",
+	})
+
+	// Presenter pairs to Meeting Room A
+	if _, err := store.PairViaPortal("MEETING-A", "Summit Organizer", "10.10.30.150", "aa:bb:cc:11:22:33"); err != nil {
+		t.Fatalf("PairViaPortal for MEETING-A failed: %v", err)
+	}
+
+	room, rcvs := store.ReceiversForGuestIP("10.10.30.150")
+	if room == nil || room.RoomNumber != "MEETING-A" {
+		t.Fatalf("expected presenter to be scoped to MEETING-A, got %+v", room)
+	}
+	if len(rcvs) != 1 || rcvs[0].DeviceID != "proj-meeting-a" {
+		t.Fatalf("expected only proj-meeting-a, got %+v", rcvs)
+	}
+}
