@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"html/template"
@@ -17,11 +18,13 @@ import (
 )
 
 type Server struct {
-	store         *session.Store
-	fw            firewall.Driver
-	mux           *http.ServeMux
-	portalHandler http.Handler
-	assetCache    *assets.Cache
+	store          *session.Store
+	fw             firewall.Driver
+	mux            *http.ServeMux
+	portalHandler  http.Handler
+	portalSecret   string
+	assetCache     *assets.Cache
+	trustedProxies []*net.IPNet
 }
 
 func NewServer(store *session.Store, fw firewall.Driver) *Server {
@@ -40,8 +43,39 @@ func (s *Server) SetAssetCache(cache *assets.Cache) {
 	s.assetCache = cache
 }
 
+// SetTrustedProxies configures CIDRs or single IPs whose X-Forwarded-For header is trusted.
+func (s *Server) SetTrustedProxies(cidrsOrIPs []string) error {
+	nets := make([]*net.IPNet, 0, len(cidrsOrIPs))
+	for _, raw := range cidrsOrIPs {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+		if strings.Contains(trimmed, "/") {
+			_, ipNet, err := net.ParseCIDR(trimmed)
+			if err != nil {
+				return err
+			}
+			nets = append(nets, ipNet)
+			continue
+		}
+		ip := net.ParseIP(trimmed)
+		if ip == nil {
+			return errors.New("invalid trusted proxy IP: " + trimmed)
+		}
+		bits := 32
+		if ip.To4() == nil {
+			bits = 128
+		}
+		nets = append(nets, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
+	}
+	s.trustedProxies = nets
+	return nil
+}
+
 // SetPortalWebhookSecret configures the shared secret for vendor portal webhooks.
 func (s *Server) SetPortalWebhookSecret(secret string) {
+	s.portalSecret = secret
 	s.portalHandler = portal.NewWebhookHandler(
 		s.store,
 		portal.NewMikroTikAdapter(secret),
@@ -62,6 +96,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/v1/portal/webhook/", func(w http.ResponseWriter, r *http.Request) {
 		s.portalHandler.ServeHTTP(w, r)
 	})
+	s.mux.HandleFunc("/api/v1/radius/accounting", s.handleRadiusAccounting)
 	s.mux.HandleFunc("/assets/", func(w http.ResponseWriter, r *http.Request) {
 		if s.assetCache == nil {
 			http.NotFound(w, r)
@@ -103,7 +138,7 @@ func (s *Server) handlePairPortal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
-	guestIP := resolveClientIP(req.GuestIP, r)
+	guestIP := s.resolveClientIP(req.GuestIP, r)
 	res, err := s.store.PairViaPortal(req.RoomNumber, req.GuestName, guestIP, req.GuestMAC)
 	if err != nil {
 		writeDomainError(w, err)
@@ -126,7 +161,7 @@ func (s *Server) handlePairPIN(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON payload")
 		return
 	}
-	guestIP := resolveClientIP(req.GuestIP, r)
+	guestIP := s.resolveClientIP(req.GuestIP, r)
 	res, err := s.store.PairViaPIN(req.PIN, guestIP, req.GuestMAC)
 	if err != nil {
 		writeDomainError(w, err)
@@ -290,13 +325,13 @@ func (s *Server) handleGatewayStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePortalPage(w http.ResponseWriter, r *http.Request) {
 	renderPage(w, portalHTML, map[string]string{
-		"GuestIP": resolveClientIP("", r),
+		"GuestIP": s.resolveClientIP("", r),
 	})
 }
 
 func (s *Server) handlePairPage(w http.ResponseWriter, r *http.Request) {
 	renderPage(w, pairHTML, map[string]string{
-		"GuestIP": resolveClientIP("", r),
+		"GuestIP": s.resolveClientIP("", r),
 		"PIN":     r.URL.Query().Get("pin"),
 	})
 }
@@ -310,14 +345,36 @@ func (s *Server) handleFrontOfficePage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func resolveClientIP(explicit string, r *http.Request) string {
+func (s *Server) isTrustedProxy(remoteAddr string) bool {
+	if len(s.trustedProxies) == 0 {
+		return false
+	}
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil || host == "" {
+		host = remoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	for _, ipNet := range s.trustedProxies {
+		if ipNet.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) resolveClientIP(explicit string, r *http.Request) string {
 	if ip := strings.TrimSpace(explicit); ip != "" {
 		return ip
 	}
-	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
-		parts := strings.Split(xff, ",")
-		if p := strings.TrimSpace(parts[0]); net.ParseIP(p) != nil {
-			return p
+	if s.isTrustedProxy(r.RemoteAddr) {
+		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+			parts := strings.Split(xff, ",")
+			if p := strings.TrimSpace(parts[0]); net.ParseIP(p) != nil {
+				return p
+			}
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -331,6 +388,39 @@ func resolveClientIP(explicit string, r *http.Request) string {
 		return "127.0.0.1"
 	}
 	return r.RemoteAddr
+}
+
+func (s *Server) handleRadiusAccounting(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.portalSecret == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	const prefix = "Bearer "
+	if !strings.HasPrefix(auth, prefix) {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(auth, prefix))
+	if subtle.ConstantTimeCompare([]byte(token), []byte(s.portalSecret)) != 1 {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	var ev models.RadiusAccountingEvent
+	if err := json.NewDecoder(r.Body).Decode(&ev); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	if err := s.store.HandleRadiusAccounting(ev); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func writeDomainError(w http.ResponseWriter, err error) {
@@ -440,7 +530,7 @@ func (s *Server) handleGuestDisconnect(w http.ResponseWriter, r *http.Request) {
 		GuestIP string `json:"guest_ip"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	callerIP := resolveClientIP("", r)
+	callerIP := s.resolveClientIP("", r)
 	if req.GuestIP != "" && req.GuestIP != callerIP {
 		writeError(w, http.StatusForbidden, "cannot disconnect another device")
 		return

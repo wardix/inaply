@@ -97,3 +97,27 @@ func TestAssetGC_RemovesOrphanedFiles(t *testing.T) {
 		t.Fatalf("expected active-ad.mp4 to remain: %v", err)
 	}
 }
+
+func TestAssetGC_PreservesInFlightTempFiles(t *testing.T) {
+	cache := NewCache(t.TempDir(), nil)
+
+	for _, name := range []string{"active-ad.mp4", "promo.mp4.tmp-12345", "orphan-old.mp4"} {
+		if err := os.WriteFile(filepath.Join(cache.Dir(), name), []byte("data"), 0o644); err != nil {
+			t.Fatalf("WriteFile %s failed: %v", name, err)
+		}
+	}
+
+	removed, err := cache.GC([]string{"active-ad.mp4"})
+	if err != nil {
+		t.Fatalf("GC failed: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("expected 1 orphaned file removed, got %d", removed)
+	}
+	if _, err := os.Stat(filepath.Join(cache.Dir(), "promo.mp4.tmp-12345")); err != nil {
+		t.Fatalf("expected in-flight temp file promo.mp4.tmp-12345 to be preserved: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cache.Dir(), "orphan-old.mp4")); !os.IsNotExist(err) {
+		t.Fatalf("expected orphan-old.mp4 to be deleted")
+	}
+}

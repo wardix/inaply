@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/inaply/gateway/internal/firewall"
 	"github.com/inaply/gateway/internal/models"
@@ -182,5 +183,85 @@ func TestGuestSelfService_DisconnectsOnlyOwnDevice(t *testing.T) {
 	}
 	if room, _ := store.ReceiversForGuestIP("10.10.30.20"); room == nil || room.RoomNumber != "302" {
 		t.Fatalf("expected 10.10.30.20 in room 302 to remain connected")
+	}
+}
+
+func TestResolveClientIP_IgnoresSpoofedXForwardedForFromUntrustedPeer(t *testing.T) {
+	fw := firewall.NewMemoryDriver()
+	store := session.NewStore(fw, nil)
+	srv := NewServer(store, fw)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/guest/disconnect", nil)
+	req.RemoteAddr = "10.10.30.10:1234"
+	req.Header.Set("X-Forwarded-For", "10.10.30.20")
+
+	if got := srv.resolveClientIP("", req); got != "10.10.30.10" {
+		t.Fatalf("expected untrusted peer X-Forwarded-For to be ignored and return 10.10.30.10, got %q", got)
+	}
+
+	if err := srv.SetTrustedProxies([]string{"10.10.30.0/24"}); err != nil {
+		t.Fatalf("SetTrustedProxies failed: %v", err)
+	}
+	if got := srv.resolveClientIP("", req); got != "10.10.30.20" {
+		t.Fatalf("expected trusted proxy X-Forwarded-For to be accepted and return 10.10.30.20, got %q", got)
+	}
+}
+
+func TestRadiusAccountingWebhook_AuthAndSync(t *testing.T) {
+	fw := firewall.NewMemoryDriver()
+	store := session.NewStore(fw, nil)
+	srv := NewServer(store, fw)
+	srv.SetPortalWebhookSecret("radius-secret")
+
+	// Seed room 301 and guest session
+	store.SeedDemoProperty()
+	store.CheckIn("301", "Alice", models.SegmentVIP, time.Time{})
+	if _, err := store.PairViaPortal("301", "Alice", "10.10.30.10", "aa:bb:cc:dd:ee:01"); err != nil {
+		t.Fatalf("PairViaPortal failed: %v", err)
+	}
+	if err := store.HandleRadiusAccounting(models.RadiusAccountingEvent{
+		StatusType:      "Start",
+		RadiusSessionID: "rad-301-1",
+		GuestIP:         "10.10.30.10",
+		GuestMAC:        "aa:bb:cc:dd:ee:01",
+		RoomNumber:      "301",
+	}); err != nil {
+		t.Fatalf("initial HandleRadiusAccounting failed: %v", err)
+	}
+
+	body := `{"acct_status_type":"Interim-Update","acct_session_id":"rad-301-1","framed_ip_address":"10.10.30.99","calling_station_id":"aa:bb:cc:dd:ee:01","room_number":"301"}`
+
+	// 1. Wrong token -> 401
+	reqUnauth := httptest.NewRequest(http.MethodPost, "/api/v1/radius/accounting", bytes.NewBufferString(body))
+	reqUnauth.Header.Set("Authorization", "Bearer wrong-secret")
+	recUnauth := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recUnauth, reqUnauth)
+	if recUnauth.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized, got %d", recUnauth.Code)
+	}
+
+	// 2. Valid token -> 200 and roaming IP updated
+	reqAuth := httptest.NewRequest(http.MethodPost, "/api/v1/radius/accounting", bytes.NewBufferString(body))
+	reqAuth.Header.Set("Authorization", "Bearer radius-secret")
+	reqAuth.Header.Set("Content-Type", "application/json")
+	recAuth := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recAuth, reqAuth)
+	if recAuth.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d (%s)", recAuth.Code, recAuth.Body.String())
+	}
+
+	room, _ := store.ReceiversForGuestIP("10.10.30.99")
+	if room == nil || room.RoomNumber != "301" {
+		t.Fatalf("expected roaming IP 10.10.30.99 to be mapped to room 301, got %+v", room)
+	}
+
+	// 3. Empty secret -> fail-closed 401 Unauthorized
+	srv.SetPortalWebhookSecret("")
+	reqEmptySecret := httptest.NewRequest(http.MethodPost, "/api/v1/radius/accounting", bytes.NewBufferString(body))
+	reqEmptySecret.Header.Set("Authorization", "Bearer ")
+	recEmptySecret := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recEmptySecret, reqEmptySecret)
+	if recEmptySecret.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized when portalSecret is empty, got %d", recEmptySecret.Code)
 	}
 }

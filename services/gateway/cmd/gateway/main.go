@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/inaply/gateway/internal/api"
+	"github.com/inaply/gateway/internal/assets"
 	"github.com/inaply/gateway/internal/edge"
 	"github.com/inaply/gateway/internal/firewall"
 	"github.com/inaply/gateway/internal/mdns"
@@ -26,6 +28,8 @@ func main() {
 	stateFile := flag.String("state-file", "./edge-state.json", "Path to atomic edge cache persistence file")
 	fwMode := flag.String("firewall", "memory", "Firewall driver: memory | nftables")
 	dryRun := flag.Bool("dry-run", true, "Run without modifying OS nftables (overrides -firewall to memory)")
+	assetsDir := flag.String("assets-dir", "", "Directory for local LAN asset cache served at /assets/")
+	trustedProxies := flag.String("trusted-proxies", "", "Comma-separated CIDRs or IPs of trusted reverse proxies for X-Forwarded-For")
 	flag.Parse()
 
 	var fw firewall.Driver
@@ -94,6 +98,15 @@ func main() {
 	apiServer := api.NewServer(store, fw)
 	if portalSecret := os.Getenv("INAPLY_PORTAL_SECRET"); portalSecret != "" {
 		apiServer.SetPortalWebhookSecret(portalSecret)
+	}
+	if *assetsDir != "" {
+		apiServer.SetAssetCache(assets.NewCache(*assetsDir, nil))
+		log.Printf("[assets] serving local LAN cache from %s at /assets/", *assetsDir)
+	}
+	if *trustedProxies != "" {
+		if err := apiServer.SetTrustedProxies(strings.Split(*trustedProxies, ",")); err != nil {
+			log.Fatalf("[gateway] invalid -trusted-proxies: %v", err)
+		}
 	}
 	httpSrv := &http.Server{
 		Addr:              *httpAddr,
