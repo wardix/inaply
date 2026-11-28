@@ -30,6 +30,7 @@ func main() {
 	dryRun := flag.Bool("dry-run", true, "Run without modifying OS nftables (overrides -firewall to memory)")
 	assetsDir := flag.String("assets-dir", "", "Directory for local LAN asset cache served at /assets/")
 	trustedProxies := flag.String("trusted-proxies", "", "Comma-separated CIDRs or IPs of trusted reverse proxies for X-Forwarded-For")
+	adminSecret := flag.String("admin-secret", "", "Shared secret for FO, PMS, and admin HTTP endpoints (or set INAPLY_ADMIN_SECRET)")
 	flag.Parse()
 
 	var fw firewall.Driver
@@ -98,6 +99,11 @@ func main() {
 	apiServer := api.NewServer(store, fw)
 	if portalSecret := os.Getenv("INAPLY_PORTAL_SECRET"); portalSecret != "" {
 		apiServer.SetPortalWebhookSecret(portalSecret)
+	}
+	if secret := strings.TrimSpace(*adminSecret); secret != "" {
+		apiServer.SetAdminSecret(secret)
+	} else if envSecret := os.Getenv("INAPLY_ADMIN_SECRET"); envSecret != "" {
+		apiServer.SetAdminSecret(envSecret)
 	}
 	if *assetsDir != "" {
 		apiServer.SetAssetCache(assets.NewCache(*assetsDir, nil))
