@@ -58,5 +58,19 @@ describe("Room Service F&B Ordering", () => {
         items: [{ itemId: "sold-out", quantity: 1 }],
       })
     ).toThrow();
+
+    // Order status lifecycle & room/tenant isolation
+    expect(svc.listOrdersForRoom("prop-1", "301")).toHaveLength(1);
+    expect(svc.listOrdersForRoom("prop-1", "302")).toHaveLength(0);
+    expect(svc.listOrdersForRoom("prop-2", "301")).toHaveLength(0);
+
+    const preparing = svc.updateOrderStatus("prop-1", order.orderId, "preparing");
+    expect(preparing.status).toBe("preparing");
+    const delivered = svc.updateOrderStatus("prop-1", order.orderId, "delivered");
+    expect(delivered.status).toBe("delivered");
+
+    // Invalid transition (delivered -> cancelled) & cross-tenant update must throw
+    expect(() => svc.updateOrderStatus("prop-1", order.orderId, "cancelled")).toThrow();
+    expect(() => svc.updateOrderStatus("prop-2", order.orderId, "cancelled")).toThrow();
   });
 });

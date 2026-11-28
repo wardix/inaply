@@ -18,12 +18,14 @@ export interface OrderLineInput {
   clientPriceMinor?: number; // ignored; server-side price is authoritative
 }
 
+export type OrderStatus = "pending" | "preparing" | "delivered" | "cancelled";
+
 export interface RoomOrder {
   orderId: string;
   propertyId: string;
   roomNumber: string;
   totalMinor: number;
-  status: "pending" | "preparing" | "delivered" | "cancelled";
+  status: OrderStatus;
 }
 
 export interface IptvChannel {
@@ -34,11 +36,19 @@ export interface IptvChannel {
   allowedPackages: string[];
 }
 
+const VALID_TRANSITIONS: Record<OrderStatus, Set<OrderStatus>> = {
+  pending: new Set(["preparing", "cancelled"]),
+  preparing: new Set(["delivered", "cancelled"]),
+  delivered: new Set(),
+  cancelled: new Set(),
+};
+
 export function createRoomOrderService(opts: {
   rooms: Map<string, OrderableRoom>;
   catalog: Map<string, CatalogItem>;
 }) {
   let seq = 1;
+  const orders = new Map<string, RoomOrder>();
 
   return {
     createOrder(input: {
@@ -47,7 +57,7 @@ export function createRoomOrderService(opts: {
       items: OrderLineInput[];
     }): RoomOrder {
       const room = opts.rooms.get(`${input.propertyId}:${input.roomNumber}`);
-      if (!room || room.status !== "occupied") {
+      if (!room || room.propertyId !== input.propertyId || room.status !== "occupied") {
         throw new Error(`Room ${input.roomNumber} is not occupied`);
       }
       if (input.items.length === 0) {
@@ -60,19 +70,53 @@ export function createRoomOrderService(opts: {
           throw new Error(`Invalid quantity for item ${line.itemId}`);
         }
         const item = opts.catalog.get(`${input.propertyId}:${line.itemId}`);
-        if (!item || !item.active) {
+        if (
+          !item ||
+          item.propertyId !== input.propertyId ||
+          !item.active ||
+          !Number.isInteger(item.priceMinor) ||
+          item.priceMinor < 0
+        ) {
           throw new Error(`Item ${line.itemId} is unavailable`);
         }
         totalMinor += item.priceMinor * line.quantity;
       }
 
-      return {
+      const order: RoomOrder = {
         orderId: `ord-${seq++}`,
         propertyId: input.propertyId,
         roomNumber: input.roomNumber,
         totalMinor,
         status: "pending",
       };
+      orders.set(order.orderId, order);
+      return { ...order };
+    },
+
+    listOrdersForRoom(propertyId: string, roomNumber: string): RoomOrder[] {
+      const result: RoomOrder[] = [];
+      for (const order of orders.values()) {
+        if (order.propertyId === propertyId && order.roomNumber === roomNumber) {
+          result.push({ ...order });
+        }
+      }
+      return result;
+    },
+
+    updateOrderStatus(
+      propertyId: string,
+      orderId: string,
+      nextStatus: OrderStatus
+    ): RoomOrder {
+      const order = orders.get(orderId);
+      if (!order || order.propertyId !== propertyId) {
+        throw new Error(`Order not found: ${orderId}`);
+      }
+      if (!VALID_TRANSITIONS[order.status].has(nextStatus)) {
+        throw new Error(`Invalid order status transition: ${order.status} -> ${nextStatus}`);
+      }
+      order.status = nextStatus;
+      return { ...order };
     },
   };
 }
