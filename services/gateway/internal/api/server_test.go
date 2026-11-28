@@ -265,3 +265,34 @@ func TestRadiusAccountingWebhook_AuthAndSync(t *testing.T) {
 		t.Fatalf("expected 401 Unauthorized when portalSecret is empty, got %d", recEmptySecret.Code)
 	}
 }
+
+func TestPairViaPortal_SignageDeviceReturns403(t *testing.T) {
+	fw := firewall.NewMemoryDriver()
+	store := session.NewStore(fw, nil)
+	store.SeedDemoProperty()
+	store.CheckIn("301", "Alice", models.SegmentVIP, time.Time{})
+	store.UpsertReceiver(models.ReceiverDevice{
+		DeviceID:    "tv-lobby-1",
+		RoomNumber:  "301",
+		Label:       "Lobby Signage",
+		IP:          "10.10.20.99",
+		Mode:        "signage",
+		Orientation: "landscape",
+		Status:      "online",
+	})
+
+	srv := NewServer(store, fw)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/pair/portal",
+		bytes.NewBufferString(`{"room_number":"301","guest_name":"Alice"}`),
+	)
+	req.RemoteAddr = "10.10.30.10:1234"
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for signage device pairing, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}

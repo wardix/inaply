@@ -17,7 +17,8 @@ import (
 )
 
 var (
-	ErrRoomNotFound      = errors.New("room not found")
+	ErrRoomNotFound           = errors.New("room not found")
+	ErrSignagePairingForbidden = errors.New("guest pairing is not allowed on signage devices")
 	ErrDeviceNotFound    = errors.New("receiver device not found")
 	ErrInvalidPIN        = errors.New("invalid or expired pairing PIN")
 	ErrGuestMismatch     = errors.New("guest name does not match room check-in record")
@@ -282,6 +283,13 @@ func (s *Store) persistLocked() error {
 	return s.persist(s.snapshotLocked())
 }
 
+func (s *Store) UpsertReceiver(rcv models.ReceiverDevice) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	copyRcv := rcv
+	s.receivers[rcv.DeviceID] = &copyRcv
+}
+
 func (s *Store) receiversForRoomLocked(roomNumber string) []models.ReceiverDevice {
 	var list []models.ReceiverDevice
 	for _, r := range s.receivers {
@@ -439,6 +447,11 @@ func (s *Store) bindGuestLocked(room *models.Room, guestIP, guestMAC, guestName 
 	if len(receivers) == 0 {
 		return nil, ErrRoomNotConfigured
 	}
+	for _, rcv := range receivers {
+		if rcv.Mode == "signage" {
+			return nil, ErrSignagePairingForbidden
+		}
+	}
 
 	// If this guest IP was previously bound to another room, revoke old room firewall rules first.
 	if existing, ok := s.sessions[guestIP]; ok && existing.RoomNumber != room.RoomNumber {
@@ -554,6 +567,45 @@ func (s *Store) TVState(deviceID string) (*models.TVBackdropState, error) {
 	if !ok {
 		return nil, ErrDeviceNotFound
 	}
+	if rcv.Mode == "signage" && rcv.RoomNumber == "" {
+		ads := make([]models.TVAdView, 0)
+		for _, ad := range s.ads {
+			if !ad.Active {
+				continue
+			}
+			ads = append(ads, models.TVAdView{
+				ID:          ad.ID,
+				Title:       ad.Title,
+				MediaURL:    ad.MediaURL,
+				CTAURL:      ad.CTAURL,
+				DurationSec: ad.DurationSec,
+			})
+		}
+		msgs := make([]models.TVMessageView, 0)
+		for _, m := range s.messages {
+			if m.RoomNumber == "" {
+				msgs = append(msgs, models.TVMessageView{
+					ID:            m.ID,
+					Title:         m.Title,
+					Body:          m.Body,
+					Priority:      m.Priority,
+					ShowAsOverlay: m.ShowAsOverlay,
+				})
+			}
+		}
+		return &models.TVBackdropState{
+			DeviceID:        rcv.DeviceID,
+			DeviceStatus:    rcv.Status,
+			DeviceLabel:     rcv.Label,
+			Mode:            rcv.Mode,
+			Orientation:     rcv.Orientation,
+			HotelName:       s.config.HotelName,
+			WelcomeTitle:    s.config.WelcomeTitle,
+			WelcomeSubtitle: s.config.WelcomeSubtitle,
+			Ads:             ads,
+			Messages:        msgs,
+		}, nil
+	}
 	room, ok := s.rooms[rcv.RoomNumber]
 	if !ok {
 		return nil, ErrRoomNotFound
@@ -596,6 +648,8 @@ func (s *Store) TVState(deviceID string) (*models.TVBackdropState, error) {
 		DeviceID:            rcv.DeviceID,
 		DeviceStatus:        rcv.Status,
 		DeviceLabel:         rcv.Label,
+		Mode:                rcv.Mode,
+		Orientation:         rcv.Orientation,
 		Occupied:            room.Occupied,
 		GuestName:           room.GuestName,
 		Segment:             room.Segment,

@@ -89,5 +89,36 @@ export function createSignageService() {
       }
       return null;
     },
+
+    syncCampaignToSignage(input: {
+      propertyId: string;
+      campaignId: string;
+      zones: SignageZone[];
+      onSync?: (event: {
+        propertyId: string;
+        deviceId: string;
+        campaignId: string;
+        zone: SignageZone;
+      }) => void;
+    }): number {
+      const targetZones = new Set(input.zones);
+      let synced = 0;
+      for (const display of displays.values()) {
+        if (
+          display.propertyId === input.propertyId &&
+          display.mode === "signage" &&
+          targetZones.has(display.zone)
+        ) {
+          input.onSync?.({
+            propertyId: display.propertyId,
+            deviceId: display.deviceId,
+            campaignId: input.campaignId,
+            zone: display.zone,
+          });
+          synced++;
+        }
+      }
+      return synced;
+    },
   };
 }

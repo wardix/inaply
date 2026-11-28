@@ -275,3 +275,62 @@ func TestRadiusStop_RevokesOnlyEndedSession(t *testing.T) {
 		t.Fatalf("expected other device 10.10.30.11 in room 301 to remain active")
 	}
 }
+
+func TestSignageDevice_RejectsPairViaPortalAndPairViaPIN(t *testing.T) {
+	fw := firewall.NewMemoryDriver()
+	store := NewStore(fw, nil)
+	store.SeedDemoProperty()
+	store.CheckIn("301", "Alice", models.SegmentVIP, time.Time{})
+
+	// Mark room 301's receiver as signage mode
+	store.UpsertReceiver(models.ReceiverDevice{
+		DeviceID:    "tv-lobby-1",
+		RoomNumber:  "301",
+		Label:       "Lobby Signage",
+		IP:          "10.10.20.99",
+		CastPort:    8009,
+		Mode:        "signage",
+		Orientation: "portrait",
+		Status:      "online",
+	})
+
+	// Both PairViaPortal and PairViaPIN must reject when target room only has signage devices
+	if _, err := store.PairViaPortal("301", "Alice", "10.10.30.10", "aa:bb:cc:00:00:01"); err == nil {
+		t.Fatalf("expected PairViaPortal to reject signage device")
+	}
+
+	rooms, _, _ := store.ListRoomsAndSessions()
+	var pin301 string
+	for _, r := range rooms {
+		if r.RoomNumber == "301" {
+			pin301 = r.CurrentPIN
+		}
+	}
+	if _, err := store.PairViaPIN(pin301, "10.10.30.10", "aa:bb:cc:00:00:01"); err == nil {
+		t.Fatalf("expected PairViaPIN to reject signage device")
+	}
+}
+
+func TestTVState_SignageDeviceWithoutRoom(t *testing.T) {
+	fw := firewall.NewMemoryDriver()
+	store := NewStore(fw, nil)
+	store.SeedDemoProperty()
+
+	store.UpsertReceiver(models.ReceiverDevice{
+		DeviceID:    "tv-lift-1",
+		RoomNumber:  "",
+		Label:       "Lift Display",
+		IP:          "10.10.20.88",
+		Mode:        "signage",
+		Orientation: "portrait",
+		Status:      "online",
+	})
+
+	state, err := store.TVState("tv-lift-1")
+	if err != nil {
+		t.Fatalf("expected TVState for signage device without room to succeed, got %v", err)
+	}
+	if state.Mode != "signage" || state.Orientation != "portrait" {
+		t.Fatalf("expected mode=signage, orientation=portrait, got mode=%q orientation=%q", state.Mode, state.Orientation)
+	}
+}

@@ -33,6 +33,8 @@ data class TVBackdropState(
     val pairingUrl: String,
     val activePairedDevices: Int,
     val resetEpoch: Long,
+    val mode: String = "room_tv",
+    val orientation: String = "landscape",
     val ads: List<BackdropAd> = emptyList(),
     val messages: List<BackdropMessage> = emptyList()
 )
@@ -107,6 +109,8 @@ class GatewaySyncClient(
                 pairingUrl = obj.optString("pairing_url", ""),
                 activePairedDevices = obj.optInt("active_paired_devices", 0),
                 resetEpoch = obj.optLong("reset_epoch", 0L),
+                mode = obj.optString("mode", "room_tv").ifBlank { "room_tv" },
+                orientation = obj.optString("orientation", "landscape").ifBlank { "landscape" },
                 ads = adsList,
                 messages = msgList
             )

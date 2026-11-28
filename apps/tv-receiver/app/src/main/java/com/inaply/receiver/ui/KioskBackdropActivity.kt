@@ -1,5 +1,6 @@
 package com.inaply.receiver.ui
 
+import android.content.pm.ActivityInfo
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
@@ -144,6 +145,14 @@ class KioskBackdropActivity : ComponentActivity() {
 
                 runOnUiThread {
                     uiState = viewModel.uiState
+                    val targetOrientation = if (uiState.orientation == "portrait") {
+                        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    } else {
+                        ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                    }
+                    if (requestedOrientation != targetOrientation) {
+                        requestedOrientation = targetOrientation
+                    }
                     currentAd = adScheduler.currentAd()
                     currentOverlay = coordinator.currentOverlay
                     isEmergencyOverlay = overlayReducer.isFullScreenEmergency()
@@ -263,29 +272,31 @@ fun KioskWelcomeScreen(
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom
-            ) {
-                Text(
-                    text = "Wi-Fi: ${state.wifiSsid.ifBlank { "Hotel-Guest" }}  •  Room ${state.roomNumber}",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White.copy(alpha = 0.9f)
-                )
-                Column(horizontalAlignment = Alignment.End) {
-                    if (pairingWidget.showFullQrWidget && pairingWidget.pairingPin.isNotBlank()) {
-                        Text(
-                            text = "Pair PIN: ${pairingWidget.pairingPin}  •  ${pairingWidget.pairingUrl}",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = Color.White
-                        )
-                    }
+            if (state.mode != "signage") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
                     Text(
-                        text = "Paired Devices: ${state.activePairedDevices}",
+                        text = "Wi-Fi: ${state.wifiSsid.ifBlank { "Hotel-Guest" }}  •  Room ${state.roomNumber}",
                         style = MaterialTheme.typography.titleMedium,
                         color = Color.White.copy(alpha = 0.9f)
                     )
+                    Column(horizontalAlignment = Alignment.End) {
+                        if (pairingWidget.showFullQrWidget && pairingWidget.pairingPin.isNotBlank()) {
+                            Text(
+                                text = "Pair PIN: ${pairingWidget.pairingPin}  •  ${pairingWidget.pairingUrl}",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White
+                            )
+                        }
+                        Text(
+                            text = "Paired Devices: ${state.activePairedDevices}",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color.White.copy(alpha = 0.9f)
+                        )
+                    }
                 }
             }
         }

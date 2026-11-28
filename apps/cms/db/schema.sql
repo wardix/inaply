@@ -52,7 +52,10 @@ CREATE TABLE rooms (
 CREATE TABLE receivers (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     property_id         UUID NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
-    room_id             UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+    room_id             UUID REFERENCES rooms(id) ON DELETE CASCADE,
+    mode                TEXT NOT NULL DEFAULT 'room_tv',
+    zone                TEXT,
+    orientation         TEXT NOT NULL DEFAULT 'landscape',
     device_id           TEXT NOT NULL UNIQUE,
     label               TEXT NOT NULL DEFAULT 'Main TV',
     lan_ip              INET NOT NULL,
