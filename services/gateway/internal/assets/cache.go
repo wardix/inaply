@@ -136,6 +136,9 @@ func (c *Cache) GC(keepFilenames []string) (int, error) {
 		if entry.IsDir() {
 			continue
 		}
+		if strings.Contains(entry.Name(), ".tmp-") {
+			continue
+		}
 		if _, ok := keep[entry.Name()]; ok {
 			continue
 		}
