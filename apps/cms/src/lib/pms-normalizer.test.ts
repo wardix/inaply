@@ -6,11 +6,12 @@ import {
   RealtaAdapter,
   VHPAdapter,
   type PMSAdapter,
+  type PMSEventType,
 } from "./pms-adapter";
 
 describe("PMS Normalizer", () => {
   test("maps VHP, Realta, Cloudbeds, Little Hotelier, and Oracle Opera payloads into uniform PMSEvent", () => {
-    const cases: Array<{ adapter: PMSAdapter; payload: Record<string, unknown>; expectedType: string }> = [
+    const cases: Array<{ adapter: PMSAdapter; payload: Record<string, unknown>; expectedType: PMSEventType }> = [
       {
         adapter: new VHPAdapter(),
         payload: {

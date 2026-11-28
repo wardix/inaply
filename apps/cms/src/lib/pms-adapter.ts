@@ -181,18 +181,18 @@ export function createPMSProcessor(opts: {
         let segment = ev.segment;
         let checkoutAt = ev.checkout_at;
 
-        if (fromRoom) {
+        if (fromRoom && fromRoom !== ev.room_number) {
           const prev = activeByRoom.get(key(propertyId, fromRoom));
-          if (prev) {
+          if (prev && prev.pms_resv_id === ev.pms_resv_id) {
             guestName = guestName ?? prev.guest_name;
             segment = segment ?? prev.segment;
             checkoutAt = checkoutAt ?? prev.checkout_at;
             activeByRoom.delete(key(propertyId, fromRoom));
+            opts.onSync?.({
+              action: "checkout",
+              room_number: fromRoom,
+            });
           }
-          opts.onSync?.({
-            action: "checkout",
-            room_number: fromRoom,
-          });
         }
 
         activeByRoom.set(key(propertyId, ev.room_number), {
