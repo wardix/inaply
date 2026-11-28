@@ -1,9 +1,9 @@
 package com.inaply.receiver.ui
 
-import com.inaply.receiver.messaging.GuestMessageItem
 import com.inaply.receiver.messaging.MessageDeduplicator
 import com.inaply.receiver.messaging.MessageOverlayReducer
 import com.inaply.receiver.messaging.PairingWidgetState
+import com.inaply.receiver.network.BackdropMessage
 import com.inaply.receiver.session.CheckoutResetWatcher
 
 /**
@@ -13,41 +13,56 @@ import com.inaply.receiver.session.CheckoutResetWatcher
 class BackdropCoordinator(
     private val deduplicator: MessageDeduplicator,
     private val overlayReducer: MessageOverlayReducer,
-    private val resetWatcher: CheckoutResetWatcher,
     private val onCheckoutReset: () -> Unit = {}
 ) {
-    var currentOverlay: GuestMessageItem? = null
-        private set
-
-    var pairingWidgetState: PairingWidgetState = PairingWidgetState.FULL_QR_WIDGET
-        private set
-
-    fun onMessagesPolled(messages: List<GuestMessageItem>, nowMs: Long) {
-        val visible = deduplicator.filterVisible(messages)
-        currentOverlay = overlayReducer.reduce(visible, nowMs)
+    private val resetWatcher = CheckoutResetWatcher(initialEpoch = 0L) {
+        pairingWidgetState = PairingWidgetState.fromGateway(
+            activePairedDevices = 0,
+            pairingPin = pairingWidgetState.pairingPin,
+            pairingUrl = pairingWidgetState.pairingUrl
+        )
+        onCheckoutReset()
     }
 
-    fun tickOverlay(nowMs: Long) {
-        val prev = currentOverlay
-        val next = overlayReducer.reduce(emptyList(), nowMs)
+    var currentOverlay: BackdropMessage? = null
+        private set
+
+    var pairingWidgetState: PairingWidgetState = PairingWidgetState.fromGateway(
+        activePairedDevices = 0,
+        pairingPin = "",
+        pairingUrl = ""
+    )
+        private set
+
+    fun onMessagesPolled(messages: List<BackdropMessage>) {
+        val newOverlays = deduplicator.filterNewOverlays(messages)
+        overlayReducer.onMessages(newOverlays)
+        currentOverlay = overlayReducer.currentOverlay()
+    }
+
+    fun tickOverlay(seconds: Int) {
+        val prev = overlayReducer.currentOverlay()
+        overlayReducer.advanceSeconds(seconds)
+        val next = overlayReducer.currentOverlay()
         if (prev != null && next == null && prev.priority == "normal") {
             deduplicator.markDismissed(prev.id)
         }
         currentOverlay = next
     }
 
-    fun onPairingChanged(pairedCount: Int) {
-        pairingWidgetState = if (pairedCount > 0) {
-            PairingWidgetState.COMPACT_TOP_RIGHT
-        } else {
-            PairingWidgetState.FULL_QR_WIDGET
-        }
+    fun onPairingChanged(
+        activePairedDevices: Int,
+        pairingPin: String = "",
+        pairingUrl: String = ""
+    ) {
+        pairingWidgetState = PairingWidgetState.fromGateway(
+            activePairedDevices = activePairedDevices,
+            pairingPin = pairingPin,
+            pairingUrl = pairingUrl
+        )
     }
 
-    fun onResetEpochPolled(resetEpoch: Int) {
-        if (resetWatcher.shouldReset(resetEpoch)) {
-            pairingWidgetState = PairingWidgetState.FULL_QR_WIDGET
-            onCheckoutReset()
-        }
+    fun onResetEpochPolled(resetEpoch: Long) {
+        resetWatcher.onResetEpoch(resetEpoch)
     }
 }

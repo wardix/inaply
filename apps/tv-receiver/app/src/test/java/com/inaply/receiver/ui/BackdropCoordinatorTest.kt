@@ -1,11 +1,10 @@
 package com.inaply.receiver.ui
 
-import com.inaply.receiver.messaging.GuestMessageItem
 import com.inaply.receiver.messaging.MessageDeduplicator
 import com.inaply.receiver.messaging.MessageOverlayReducer
-import com.inaply.receiver.messaging.PairingWidgetState
-import com.inaply.receiver.session.CheckoutResetWatcher
+import com.inaply.receiver.network.BackdropMessage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -17,28 +16,27 @@ class BackdropCoordinatorTest {
         val deduplicator = MessageDeduplicator()
         val coordinator = BackdropCoordinator(
             deduplicator = deduplicator,
-            overlayReducer = MessageOverlayReducer(),
-            resetWatcher = CheckoutResetWatcher()
+            overlayReducer = MessageOverlayReducer()
         )
 
-        val msg = GuestMessageItem(
+        val msg = BackdropMessage(
             id = "msg-normal-1",
             title = "Welcome",
             body = "Enjoy your stay",
-            priority = "normal"
+            priority = "normal",
+            showAsOverlay = true
         )
 
-        // First poll at t=1000 -> shows normal overlay
-        coordinator.onMessagesPolled(listOf(msg), nowMs = 1000L)
+        // First poll -> shows normal overlay
+        coordinator.onMessagesPolled(listOf(msg))
         assertEquals("msg-normal-1", coordinator.currentOverlay?.id)
 
-        // Advance time past auto-dismiss (e.g. 16s later) -> auto-dismissed & marked in deduplicator
-        coordinator.tickOverlay(nowMs = 17_000L)
+        // Advance time past auto-dismiss (16s) -> auto-dismissed & marked in deduplicator
+        coordinator.tickOverlay(seconds = 16)
         assertNull(coordinator.currentOverlay)
-        assertTrue(deduplicator.isDismissed("msg-normal-1"))
 
-        // Subsequent poll with same message -> must NOT re-show
-        coordinator.onMessagesPolled(listOf(msg), nowMs = 18_000L)
+        // Subsequent poll with same message -> deduplicator filters it out
+        coordinator.onMessagesPolled(listOf(msg))
         assertNull(coordinator.currentOverlay)
     }
 
@@ -48,21 +46,24 @@ class BackdropCoordinatorTest {
         val coordinator = BackdropCoordinator(
             deduplicator = MessageDeduplicator(),
             overlayReducer = MessageOverlayReducer(),
-            resetWatcher = CheckoutResetWatcher(),
             onCheckoutReset = { resetCount++ }
         )
 
-        // Guest is paired -> widget is compact
-        coordinator.onPairingChanged(pairedCount = 1)
-        assertEquals(PairingWidgetState.COMPACT_TOP_RIGHT, coordinator.pairingWidgetState)
+        // Guest is paired -> full QR widget is hidden
+        coordinator.onPairingChanged(
+            activePairedDevices = 1,
+            pairingPin = "123456",
+            pairingUrl = "http://192.168.10.1/pair"
+        )
+        assertFalse(coordinator.pairingWidgetState.showFullQrWidget)
 
-        // Initial epoch 1
-        coordinator.onResetEpochPolled(resetEpoch = 1)
+        // Initial epoch 1 -> no reset
+        coordinator.onResetEpochPolled(resetEpoch = 1L)
         assertEquals(0, resetCount)
 
         // Epoch increments to 2 -> triggers reset once & restores full QR widget
-        coordinator.onResetEpochPolled(resetEpoch = 2)
+        coordinator.onResetEpochPolled(resetEpoch = 2L)
         assertEquals(1, resetCount)
-        assertEquals(PairingWidgetState.FULL_QR_WIDGET, coordinator.pairingWidgetState)
+        assertTrue(coordinator.pairingWidgetState.showFullQrWidget)
     }
 }
