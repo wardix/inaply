@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"html/template"
@@ -394,14 +395,22 @@ func (s *Server) handleRadiusAccounting(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if s.portalSecret != "" {
-		auth := strings.TrimSpace(r.Header.Get("Authorization"))
-		const prefix = "Bearer "
-		if !strings.HasPrefix(auth, prefix) || strings.TrimSpace(strings.TrimPrefix(auth, prefix)) != s.portalSecret {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
-			return
-		}
+	if s.portalSecret == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
 	}
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	const prefix = "Bearer "
+	if !strings.HasPrefix(auth, prefix) {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(auth, prefix))
+	if subtle.ConstantTimeCompare([]byte(token), []byte(s.portalSecret)) != 1 {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
 	var ev models.RadiusAccountingEvent
 	if err := json.NewDecoder(r.Body).Decode(&ev); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json body")

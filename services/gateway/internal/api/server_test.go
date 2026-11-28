@@ -254,4 +254,14 @@ func TestRadiusAccountingWebhook_AuthAndSync(t *testing.T) {
 	if room == nil || room.RoomNumber != "301" {
 		t.Fatalf("expected roaming IP 10.10.30.99 to be mapped to room 301, got %+v", room)
 	}
+
+	// 3. Empty secret -> fail-closed 401 Unauthorized
+	srv.SetPortalWebhookSecret("")
+	reqEmptySecret := httptest.NewRequest(http.MethodPost, "/api/v1/radius/accounting", bytes.NewBufferString(body))
+	reqEmptySecret.Header.Set("Authorization", "Bearer ")
+	recEmptySecret := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recEmptySecret, reqEmptySecret)
+	if recEmptySecret.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized when portalSecret is empty, got %d", recEmptySecret.Code)
+	}
 }
