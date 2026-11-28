@@ -23,6 +23,7 @@ type Server struct {
 	mux            *http.ServeMux
 	portalHandler  http.Handler
 	portalSecret   string
+	adminSecret    string
 	assetCache     *assets.Cache
 	trustedProxies []*net.IPNet
 }
@@ -73,6 +74,32 @@ func (s *Server) SetTrustedProxies(cidrsOrIPs []string) error {
 	return nil
 }
 
+// SetAdminSecret configures the shared secret for FO, PMS, and admin endpoints.
+func (s *Server) SetAdminSecret(secret string) {
+	s.adminSecret = secret
+}
+
+func (s *Server) requireAdminAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.adminSecret == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		auth := strings.TrimSpace(r.Header.Get("Authorization"))
+		const prefix = "Bearer "
+		if !strings.HasPrefix(auth, prefix) {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		token := strings.TrimSpace(strings.TrimPrefix(auth, prefix))
+		if subtle.ConstantTimeCompare([]byte(token), []byte(s.adminSecret)) != 1 {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		next(w, r)
+	}
+}
+
 // SetPortalWebhookSecret configures the shared secret for vendor portal webhooks.
 func (s *Server) SetPortalWebhookSecret(secret string) {
 	s.portalSecret = secret
@@ -107,16 +134,16 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/v1/pair/pin", s.handlePairPIN)
 	s.mux.HandleFunc("/api/v1/tv/state", s.handleTVState)
 	s.mux.HandleFunc("/api/v1/tv/heartbeat", s.handleTVHeartbeat)
-	s.mux.HandleFunc("/api/v1/pms/checkin", s.handlePMSCheckIn)
-	s.mux.HandleFunc("/api/v1/pms/checkout", s.handlePMSCheckOut)
-	s.mux.HandleFunc("/api/v1/messages", s.handleMessages)
-	s.mux.HandleFunc("/api/v1/ads", s.handleAds)
-	s.mux.HandleFunc("/api/v1/gateway/status", s.handleGatewayStatus)
+	s.mux.HandleFunc("/api/v1/pms/checkin", s.requireAdminAuth(s.handlePMSCheckIn))
+	s.mux.HandleFunc("/api/v1/pms/checkout", s.requireAdminAuth(s.handlePMSCheckOut))
+	s.mux.HandleFunc("/api/v1/messages", s.requireAdminAuth(s.handleMessages))
+	s.mux.HandleFunc("/api/v1/ads", s.requireAdminAuth(s.handleAds))
+	s.mux.HandleFunc("/api/v1/gateway/status", s.requireAdminAuth(s.handleGatewayStatus))
 
 	// Lightweight interactive demo UIs for Captive Portal, QR/PIN Fallback, and Front Office
 	s.mux.HandleFunc("/portal", s.handlePortalPage)
 	s.mux.HandleFunc("/pair", s.handlePairPage)
-	s.mux.HandleFunc("/fo", s.handleFrontOfficePage)
+	s.mux.HandleFunc("/fo", s.requireAdminAuth(s.handleFrontOfficePage))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

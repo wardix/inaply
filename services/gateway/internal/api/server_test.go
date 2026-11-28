@@ -19,6 +19,7 @@ func TestEndToEndHTTPWorkflow(t *testing.T) {
 	store.SeedDemoProperty()
 
 	srv := NewServer(store, fw)
+	srv.SetAdminSecret("test-admin-secret")
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -55,7 +56,10 @@ func TestEndToEndHTTPWorkflow(t *testing.T) {
 		"priority":        "normal",
 		"show_as_overlay": true,
 	})
-	msgRes, err := http.Post(ts.URL+"/api/v1/messages", "application/json", bytes.NewReader(msgBody))
+	msgReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/messages", bytes.NewReader(msgBody))
+	msgReq.Header.Set("Content-Type", "application/json")
+	msgReq.Header.Set("Authorization", "Bearer test-admin-secret")
+	msgRes, err := http.DefaultClient.Do(msgReq)
 	if err != nil || msgRes.StatusCode != http.StatusOK {
 		t.Fatalf("POST /messages failed: %v", err)
 	}
@@ -72,7 +76,10 @@ func TestEndToEndHTTPWorkflow(t *testing.T) {
 
 	// 5. Front Office triggers checkout -> clears session & increments ResetEpoch
 	coBody, _ := json.Marshal(map[string]string{"room_number": "301"})
-	coRes, err := http.Post(ts.URL+"/api/v1/pms/checkout", "application/json", bytes.NewReader(coBody))
+	coReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/pms/checkout", bytes.NewReader(coBody))
+	coReq.Header.Set("Content-Type", "application/json")
+	coReq.Header.Set("Authorization", "Bearer test-admin-secret")
+	coRes, err := http.DefaultClient.Do(coReq)
 	if err != nil || coRes.StatusCode != http.StatusOK {
 		t.Fatalf("POST /pms/checkout failed: %v", err)
 	}
@@ -294,5 +301,81 @@ func TestPairViaPortal_SignageDeviceReturns403(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden for signage device pairing, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminAuth_RejectsMissingOrWrongTokenOnPMSAndFOEndpoints(t *testing.T) {
+	fw := firewall.NewMemoryDriver()
+	store := session.NewStore(fw, nil)
+	store.SeedDemoProperty()
+	srv := NewServer(store, fw)
+
+	endpoints := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, "/api/v1/pms/checkin", `{"room_number":"301","guest_name":"Alice"}`},
+		{http.MethodPost, "/api/v1/pms/checkout", `{"room_number":"301"}`},
+		{http.MethodPost, "/api/v1/messages", `{"title":"Hi","body":"Welcome","priority":"normal"}`},
+		{http.MethodPost, "/api/v1/ads", `{"id":"ad-1","title":"Spa","media_url":"http://x/a.mp4","duration_sec":10,"active":true}`},
+		{http.MethodGet, "/api/v1/gateway/status", ""},
+		{http.MethodGet, "/fo", ""},
+	}
+
+	// 1. Empty adminSecret -> fail-closed 401
+	for _, ep := range endpoints {
+		req := httptest.NewRequest(ep.method, ep.path, bytes.NewBufferString(ep.body))
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 when adminSecret is empty for %s %s, got %d", ep.method, ep.path, rec.Code)
+		}
+	}
+
+	// 2. Configured adminSecret, missing or wrong token -> 401
+	srv.SetAdminSecret("super-admin-secret")
+	for _, ep := range endpoints {
+		reqMissing := httptest.NewRequest(ep.method, ep.path, bytes.NewBufferString(ep.body))
+		recMissing := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(recMissing, reqMissing)
+		if recMissing.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 for missing token on %s %s, got %d", ep.method, ep.path, recMissing.Code)
+		}
+
+		reqWrong := httptest.NewRequest(ep.method, ep.path, bytes.NewBufferString(ep.body))
+		reqWrong.Header.Set("Authorization", "Bearer wrong-secret")
+		recWrong := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(recWrong, reqWrong)
+		if recWrong.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 for wrong token on %s %s, got %d", ep.method, ep.path, recWrong.Code)
+		}
+	}
+}
+
+func TestAdminAuth_AllowsValidTokenAndKeepsGuestTVRoutesWorking(t *testing.T) {
+	fw := firewall.NewMemoryDriver()
+	store := session.NewStore(fw, nil)
+	store.SeedDemoProperty()
+	srv := NewServer(store, fw)
+	srv.SetAdminSecret("super-admin-secret")
+
+	// Valid Bearer token -> 200 OK on admin endpoints
+	reqStatus := httptest.NewRequest(http.MethodGet, "/api/v1/gateway/status", nil)
+	reqStatus.Header.Set("Authorization", "Bearer super-admin-secret")
+	recStatus := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recStatus, reqStatus)
+	if recStatus.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK with valid admin token, got %d", recStatus.Code)
+	}
+
+	// Guest & TV routes remain accessible without admin token
+	for _, path := range []string{"/healthz", "/api/v1/tv/state?device_id=tv-301-main"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK without admin token for %s, got %d", path, rec.Code)
+		}
 	}
 }
