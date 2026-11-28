@@ -57,9 +57,10 @@ class KioskBackdropActivity : ComponentActivity() {
     private val overlayReducer = MessageOverlayReducer()
     private val deduplicator = MessageDeduplicator()
     private val adScheduler = AdPlaylistScheduler()
-    private val mirrorSessionManager = MirrorSessionManager()
-    private val cecController = HdmiCecController()
-    private val cecDebounce = HdmiCecDebounceController(minIntervalMs = 5_000L)
+
+    private lateinit var mirrorSessionManager: MirrorSessionManager
+    private lateinit var cecController: HdmiCecController
+    private lateinit var cecDebounce: HdmiCecDebounceController
 
     private lateinit var deviceOwnerManager: DeviceOwnerManager
     private lateinit var gatewaySyncClient: GatewaySyncClient
@@ -84,14 +85,16 @@ class KioskBackdropActivity : ComponentActivity() {
                 dest.outputStream().use { output -> input.copyTo(output) }
             }
         }
+        mirrorSessionManager = MirrorSessionManager(initialEpoch = 0L) {
+            // Active mirroring session terminated on checkout reset
+        }
+        cecController = HdmiCecController(this)
+        cecDebounce = HdmiCecDebounceController(debounceWindowMs = 5_000L) {
+            cecController.requestActiveSource("emergency_overlay")
+        }
         coordinator = BackdropCoordinator(
             deduplicator = deduplicator,
-            overlayReducer = overlayReducer,
-            onCheckoutReset = {
-                mirrorSessionManager.terminateSession()
-                adScheduler.updatePlaylist(emptyList())
-                currentAd = null
-            }
+            overlayReducer = overlayReducer
         )
 
         deviceOwnerManager.applyHospitalityRestrictions(this)
@@ -133,11 +136,10 @@ class KioskBackdropActivity : ComponentActivity() {
                     pairingUrl = state.pairingUrl
                 )
                 coordinator.onResetEpochPolled(state.resetEpoch)
+                mirrorSessionManager.onResetEpoch(state.resetEpoch)
 
-                if (overlayReducer.isFullScreenEmergency() &&
-                    cecDebounce.shouldTrigger(System.currentTimeMillis())
-                ) {
-                    cecController.requestActiveSource()
+                if (overlayReducer.isFullScreenEmergency()) {
+                    cecDebounce.requestActiveSource()
                 }
 
                 runOnUiThread {
@@ -251,7 +253,7 @@ fun KioskWelcomeScreen(
                             )
                             if (ctaQr != null) {
                                 Text(
-                                    text = "Scan QR: ${ctaQr.qrPayload}",
+                                    text = "Scan QR: ${ctaQr.payload}",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = Color.White.copy(alpha = 0.85f)
                                 )
