@@ -53,5 +53,15 @@ describe("Signage Multi-Zone Schedule", () => {
       new Date("2026-11-28T05:00:00Z")
     );
     expect(lobby).toBe("lobby-welcome");
+
+    // Multi-tenant isolation: prop-2 must NOT see prop-1 schedules
+    expect(
+      svc.resolveActivePlaylist("prop-2", "lobby", new Date("2026-11-28T05:00:00Z"))
+    ).toBeNull();
+
+    // Boundary: endHour (11:00 WIB = 04:00Z) is exclusive -> switches to lunch-special
+    expect(
+      svc.resolveActivePlaylist("prop-1", "restaurant", new Date("2026-11-28T04:00:00Z"))
+    ).toBe("lunch-special");
   });
 });

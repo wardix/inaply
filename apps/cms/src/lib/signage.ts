@@ -49,13 +49,27 @@ export function createSignageService() {
 
     pairGuest(deviceId: string, _guestId: string): { paired: true } {
       const display = displays.get(deviceId);
-      if (display && display.mode === "signage") {
+      if (!display) {
+        throw new Error(`Display not found: ${deviceId}`);
+      }
+      if (display.mode === "signage") {
         throw new SignagePairingForbiddenError(deviceId);
       }
       return { paired: true };
     },
 
     addSchedule(rule: SignageScheduleRule): void {
+      if (
+        !Number.isInteger(rule.startHour) ||
+        !Number.isInteger(rule.endHour) ||
+        rule.startHour < 0 ||
+        rule.endHour > 24 ||
+        rule.startHour >= rule.endHour
+      ) {
+        throw new Error(
+          `Invalid schedule hours: startHour=${rule.startHour}, endHour=${rule.endHour}`
+        );
+      }
       schedules.push({ ...rule });
     },
 
